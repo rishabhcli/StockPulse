@@ -1,0 +1,450 @@
+ * Serving Flask app 'app'
+ * Debug mode: on
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8080
+ * Running on http://10.143.254.2:8080
+[33mPress CTRL+C to quit[0m
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 471-133-255
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"Quote not found for symbol: ^NDQ"}}}
+$^NDQ: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"Quote not found for symbol: WBA"}}}
+$WBA: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+$SQ: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+$SQ: possibly delisted; no price data found  (period=1y) (Yahoo error = "No data found, symbol may be delisted")
+$SQ: possibly delisted; no timezone found
+$PXD: possibly delisted; no price data found  (period=1y) (Yahoo error = "No data found, symbol may be delisted")
+$PXD: possibly delisted; no timezone found
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: SPY"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: QQQ"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: SPY"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: QQQ"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: IWM"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: IWM"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: DIA"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: DIA"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: VTI"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: VTI"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: VOO"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: VOO"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: ARKK"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: ARKK"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: XLF"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: XLF"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: XLE"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: XLE"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: XLK"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: XLK"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: GLD"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: GLD"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: SLV"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: SLV"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: TLT"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: TLT"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: HYG"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: HYG"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: EEM"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: EEM"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: VWO"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: VWO"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: IEMG"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: IEMG"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: VEA"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: VEA"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: EFA"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: EFA"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: SOXL"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: SOXL"}}}
+$SQ: possibly delisted; no price data found  (period=1y) (Yahoo error = "No data found, symbol may be delisted")
+$PXD: possibly delisted; no price data found  (period=1y) (Yahoo error = "No data found, symbol may be delisted")
+$SQ: possibly delisted; no timezone found
+$PXD: possibly delisted; no timezone found
+127.0.0.1 - - [24/Jan/2026 16:21:07] "GET /api/snapshot HTTP/1.1" 200 -
+ * Detected change in '/Users/rishabhbansal/Documents/GitHub/Daytona_trading_agent/app.py', reloading
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 471-133-255
+ * Detected change in '/Users/rishabhbansal/Documents/GitHub/Daytona_trading_agent/app.py', reloading
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 471-133-255
+127.0.0.1 - - [24/Jan/2026 16:23:00] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 16:23:01] "GET /manifest.json HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 16:23:01] "GET /sw.js HTTP/1.1" 200 -
+ * Detected change in '/Users/rishabhbansal/Documents/GitHub/Daytona_trading_agent/app.py', reloading
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"Quote not found for symbol: ^NDQ"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"Quote not found for symbol: ^NDQ"}}}
+$^NDQ: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+$^NDQ: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+$WBA: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+$WBA: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+$SQ: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+127.0.0.1 - - [24/Jan/2026 16:23:27] "GET /api/snapshot HTTP/1.1" 200 -
+$SQ: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+127.0.0.1 - - [24/Jan/2026 16:23:28] "GET /api/snapshot HTTP/1.1" 200 -
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 471-133-255
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"Quote not found for symbol: ^NDQ"}}}
+$^NDQ: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"Quote not found for symbol: WBA"}}}
+$WBA: possibly delisted; no price data found  (period=1y) (Yahoo error = "No data found, symbol may be delisted")
+$WBA: possibly delisted; no timezone found
+$SQ: possibly delisted; no price data found  (period=1y) (Yahoo error = "No data found, symbol may be delisted")
+$SQ: possibly delisted; no timezone found
+127.0.0.1 - - [24/Jan/2026 16:23:52] "GET /api/snapshot HTTP/1.1" 200 -
+$WBA: possibly delisted; no price data found  (period=1y) (Yahoo error = "No data found, symbol may be delisted")
+$SQ: possibly delisted; no price data found  (period=1y) (Yahoo error = "No data found, symbol may be delisted")
+$SQ: possibly delisted; no timezone found
+$WBA: possibly delisted; no timezone found
+127.0.0.1 - - [24/Jan/2026 16:24:01] "GET /api/snapshot HTTP/1.1" 200 -
+$WISH: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+$IDEX: possibly delisted; no price data found  (period=5d)
+$ZOM: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+$RIDE: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+$NAKD: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+$PARA: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+$SQ: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+127.0.0.1 - - [24/Jan/2026 16:25:10] "GET /api/penny-stocks HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 16:25:53] "POST /api/analyze HTTP/1.1" 200 -
+ * Detected change in '/Users/rishabhbansal/Documents/GitHub/Daytona_trading_agent/app.py', reloading
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 471-133-255
+127.0.0.1 - - [24/Jan/2026 16:31:23] "GET /static/icon-32.png HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 16:31:23] "GET /static/icon-16.png HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 16:31:23] "GET /static/icon-180.png HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 16:31:23] "GET /static/icon-180.png HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 16:31:23] "GET /static/icon-180.png HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 16:31:23] "GET /static/icon-152.png HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 16:31:23] "[35m[1mGET /apple-touch-icon-precomposed.png HTTP/1.1[0m" 500 -
+127.0.0.1 - - [24/Jan/2026 16:31:23] "[35m[1mGET /apple-touch-icon.png HTTP/1.1[0m" 500 -
+Traceback (most recent call last):
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/app.py", line 278, in <lambda>
+    view_func=lambda **kw: self_ref().send_static_file(**kw),  # type: ignore # noqa: B950
+                           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/app.py", line 326, in send_static_file
+    return send_from_directory(
+    
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/helpers.py", line 572, in send_from_directory
+    return werkzeug.utils.send_from_directory(  # type: ignore[return-value]
+    
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/werkzeug/utils.py", line 568, in send_from_directory
+    raise NotFound()
+werkzeug.exceptions.NotFound: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/app.py", line 1536, in __call__
+    return self.wsgi_app(environ, start_response)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/app.py", line 1514, in wsgi_app
+    response = self.handle_exception(e)
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask_cors/extension.py", line 176, in wrapped_function
+    return cors_after_request(app.make_response(f(*args, **kwargs)))
+                                                ~^^^^^^^^^^^^^^^^^
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask_cors/extension.py", line 176, in wrapped_function
+    return cors_after_request(app.make_response(f(*args, **kwargs)))
+                                                ~^^^^^^^^^^^^^^^^^
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/app.py", line 802, in handle_user_exception
+    return self.handle_http_exception(e)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/app.py", line 777, in handle_http_exception
+    return self.ensure_sync(handler)(e)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^^^
+  File "/Users/rishabhbansal/Documents/GitHub/Daytona_trading_agent/app.py", line 3776, in not_found
+    return send_from_directory(app.static_folder, 'index.html')
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/helpers.py", line 572, in send_from_directory
+    return werkzeug.utils.send_from_directory(  # type: ignore[return-value]
+    
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/werkzeug/utils.py", line 568, in send_from_directory
+    raise NotFound()
+werkzeug.exceptions.NotFound: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+127.0.0.1 - - [24/Jan/2026 16:31:23] "[35m[1mGET /favicon.ico HTTP/1.1[0m" 500 -
+Traceback (most recent call last):
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/app.py", line 278, in <lambda>
+    view_func=lambda **kw: self_ref().send_static_file(**kw),  # type: ignore # noqa: B950
+                           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/app.py", line 326, in send_static_file
+    return send_from_directory(
+    
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/helpers.py", line 572, in send_from_directory
+    return werkzeug.utils.send_from_directory(  # type: ignore[return-value]
+    
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/werkzeug/utils.py", line 568, in send_from_directory
+    raise NotFound()
+werkzeug.exceptions.NotFound: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/app.py", line 1536, in __call__
+    return self.wsgi_app(environ, start_response)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/app.py", line 1514, in wsgi_app
+    response = self.handle_exception(e)
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask_cors/extension.py", line 176, in wrapped_function
+    return cors_after_request(app.make_response(f(*args, **kwargs)))
+                                                ~^^^^^^^^^^^^^^^^^
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask_cors/extension.py", line 176, in wrapped_function
+    return cors_after_request(app.make_response(f(*args, **kwargs)))
+                                                ~^^^^^^^^^^^^^^^^^
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/app.py", line 802, in handle_user_exception
+    return self.handle_http_exception(e)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/app.py", line 777, in handle_http_exception
+    return self.ensure_sync(handler)(e)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^^^
+  File "/Users/rishabhbansal/Documents/GitHub/Daytona_trading_agent/app.py", line 3776, in not_found
+    return send_from_directory(app.static_folder, 'index.html')
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/helpers.py", line 572, in send_from_directory
+    return werkzeug.utils.send_from_directory(  # type: ignore[return-value]
+    
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/werkzeug/utils.py", line 568, in send_from_directory
+    raise NotFound()
+werkzeug.exceptions.NotFound: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+Traceback (most recent call last):
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/app.py", line 917, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/app.py", line 902, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/app.py", line 278, in <lambda>
+    view_func=lambda **kw: self_ref().send_static_file(**kw),  # type: ignore # noqa: B950
+                           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/app.py", line 326, in send_static_file
+    return send_from_directory(
+    
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/helpers.py", line 572, in send_from_directory
+    return werkzeug.utils.send_from_directory(  # type: ignore[return-value]
+    
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/werkzeug/utils.py", line 568, in send_from_directory
+    raise NotFound()
+werkzeug.exceptions.NotFound: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/app.py", line 1536, in __call__
+    return self.wsgi_app(environ, start_response)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/app.py", line 1514, in wsgi_app
+    response = self.handle_exception(e)
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask_cors/extension.py", line 176, in wrapped_function
+    return cors_after_request(app.make_response(f(*args, **kwargs)))
+                                                ~^^^^^^^^^^^^^^^^^
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/app.py", line 1511, in wsgi_app
+    response = self.full_dispatch_request()
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/app.py", line 919, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask_cors/extension.py", line 176, in wrapped_function
+    return cors_after_request(app.make_response(f(*args, **kwargs)))
+                                                ~^^^^^^^^^^^^^^^^^
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/app.py", line 802, in handle_user_exception
+    return self.handle_http_exception(e)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/app.py", line 777, in handle_http_exception
+    return self.ensure_sync(handler)(e)  # type: ignore[no-any-return]
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^^^
+  File "/Users/rishabhbansal/Documents/GitHub/Daytona_trading_agent/app.py", line 3776, in not_found
+    return send_from_directory(app.static_folder, 'index.html')
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/flask/helpers.py", line 572, in send_from_directory
+    return werkzeug.utils.send_from_directory(  # type: ignore[return-value]
+    
+  File "/Users/rishabhbansal/miniconda3/lib/python3.13/site-packages/werkzeug/utils.py", line 568, in send_from_directory
+    raise NotFound()
+werkzeug.exceptions.NotFound: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+ * Detected change in '/Users/rishabhbansal/Documents/GitHub/Daytona_trading_agent/app.py', reloading
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 471-133-255
+ * Detected change in '/Users/rishabhbansal/Documents/GitHub/Daytona_trading_agent/app.py', reloading
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 471-133-255
+ * Detected change in '/Users/rishabhbansal/Documents/GitHub/Daytona_trading_agent/app.py', reloading
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 471-133-255
+ * Detected change in '/Users/rishabhbansal/Documents/GitHub/Daytona_trading_agent/app.py', reloading
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 471-133-255
+ * Detected change in '/Users/rishabhbansal/Documents/GitHub/Daytona_trading_agent/app.py', reloading
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 471-133-255
+ * Detected change in '/Users/rishabhbansal/Documents/GitHub/Daytona_trading_agent/app.py', reloading
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 471-133-255
+ * Detected change in '/Users/rishabhbansal/Documents/GitHub/Daytona_trading_agent/app.py', reloading
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 471-133-255
+ * Detected change in '/Users/rishabhbansal/Documents/GitHub/Daytona_trading_agent/app.py', reloading
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 471-133-255
+127.0.0.1 - - [24/Jan/2026 17:05:04] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:05:05] "GET /manifest.json HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:05:05] "GET /sw.js HTTP/1.1" 200 -
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"Quote not found for symbol: WBA"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"Quote not found for symbol: WBA"}}}
+$WBA: possibly delisted; no price data found  (period=1y) (Yahoo error = "No data found, symbol may be delisted")
+$WBA: possibly delisted; no price data found  (period=1y) (Yahoo error = "No data found, symbol may be delisted")
+$WBA: possibly delisted; no timezone found
+$WBA: possibly delisted; no timezone found
+127.0.0.1 - - [24/Jan/2026 17:05:18] "GET /api/snapshot HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:05:18] "GET /api/snapshot HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:07:06] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:07:06] "GET /manifest.json HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:07:07] "GET /sw.js HTTP/1.1" 200 -
+$WBA: possibly delisted; no price data found  (period=1y) (Yahoo error = "No data found, symbol may be delisted")
+$WBA: possibly delisted; no price data found  (period=1y) (Yahoo error = "No data found, symbol may be delisted")
+$WBA: possibly delisted; no timezone found
+$WBA: possibly delisted; no timezone found
+127.0.0.1 - - [24/Jan/2026 17:07:09] "GET /api/snapshot HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:07:09] "GET /api/snapshot HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:07:27] "GET /health HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:07:29] "GET /health HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:07:42] "GET /health HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:07:42] "POST /api/analyze HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:07:48] "POST /api/analyze HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:10:41] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:10:41] "[36mGET /manifest.json HTTP/1.1[0m" 304 -
+127.0.0.1 - - [24/Jan/2026 17:10:42] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:10:42] "[36mGET /manifest.json HTTP/1.1[0m" 304 -
+127.0.0.1 - - [24/Jan/2026 17:10:42] "GET /sw.js HTTP/1.1" 200 -
+$WBA: possibly delisted; no price data found  (period=1y) (Yahoo error = "No data found, symbol may be delisted")
+$WBA: possibly delisted; no price data found  (period=1y) (Yahoo error = "No data found, symbol may be delisted")
+$WBA: possibly delisted; no price data found  (period=1y) (Yahoo error = "No data found, symbol may be delisted")
+$WBA: possibly delisted; no price data found  (period=1y) (Yahoo error = "No data found, symbol may be delisted")
+$WBA: possibly delisted; no timezone found
+$WBA: possibly delisted; no timezone found
+$WBA: possibly delisted; no timezone found
+$WBA: possibly delisted; no timezone found
+127.0.0.1 - - [24/Jan/2026 17:10:46] "GET /api/snapshot HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:10:46] "GET /api/snapshot HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:10:46] "GET /api/snapshot HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:10:46] "GET /api/snapshot HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:12:50] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:12:50] "[36mGET /manifest.json HTTP/1.1[0m" 304 -
+127.0.0.1 - - [24/Jan/2026 17:12:51] "GET /sw.js HTTP/1.1" 200 -
+$WBA: possibly delisted; no price data found  (period=1y) (Yahoo error = "No data found, symbol may be delisted")
+$WBA: possibly delisted; no price data found  (period=1y) (Yahoo error = "No data found, symbol may be delisted")
+$WBA: possibly delisted; no timezone found
+$WBA: possibly delisted; no timezone found
+127.0.0.1 - - [24/Jan/2026 17:12:54] "GET /api/snapshot HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:12:54] "GET /api/snapshot HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:14:11] "POST /api/analyze HTTP/1.1" 200 -
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: SPY"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: SPY"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: QQQ"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: QQQ"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: IWM"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: DIA"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: IWM"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: DIA"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: VTI"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: VOO"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: VTI"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: VOO"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: XLF"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: ARKK"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: ARKK"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: XLF"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: XLK"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: XLE"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: XLE"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: XLK"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: SLV"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: GLD"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: SLV"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: GLD"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: TLT"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: TLT"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: HYG"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: EEM"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: HYG"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: EEM"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: IEMG"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: IEMG"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: VEA"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: VEA"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: VWO"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: VWO"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: EFA"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: EFA"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: SOXL"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"No fundamentals data found for symbol: SOXL"}}}
+127.0.0.1 - - [24/Jan/2026 17:15:29] "GET /api/earnings-calendar HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:15:29] "GET /api/earnings-calendar HTTP/1.1" 200 -
+$WISH: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+$WISH: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+$IDEX: possibly delisted; no price data found  (period=5d)
+$IDEX: possibly delisted; no price data found  (period=5d)
+$ZOM: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+$ZOM: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+$RIDE: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+$RIDE: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+$NAKD: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+$NAKD: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+$PARA: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+$PARA: possibly delisted; no price data found  (period=5d) (Yahoo error = "No data found, symbol may be delisted")
+127.0.0.1 - - [24/Jan/2026 17:17:56] "GET /api/penny-stocks HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:17:56] "GET /api/penny-stocks HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:19:37] "GET /api/trading-sim/status HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:19:37] "GET /api/trading-sim/trades?limit=50 HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:19:37] "GET /api/trading-sim/history HTTP/1.1" 200 -
+$WBA: possibly delisted; no price data found  (period=1y) (Yahoo error = "No data found, symbol may be delisted")
+$WBA: possibly delisted; no timezone found
+127.0.0.1 - - [24/Jan/2026 17:21:15] "GET /api/snapshot HTTP/1.1" 200 -
+$WBA: possibly delisted; no price data found  (period=1y) (Yahoo error = "No data found, symbol may be delisted")
+$WBA: possibly delisted; no timezone found
+127.0.0.1 - - [24/Jan/2026 17:21:35] "GET /api/snapshot HTTP/1.1" 200 -
+ * Detected change in '/Users/rishabhbansal/Documents/GitHub/Daytona_trading_agent/app.py', reloading
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 471-133-255
+127.0.0.1 - - [24/Jan/2026 17:26:36] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:26:36] "GET /manifest.json HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:26:37] "GET /sw.js HTTP/1.1" 200 -
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"Quote not found for symbol: WBA"}}}
+HTTP Error 404: {"quoteSummary":{"result":null,"error":{"code":"Not Found","description":"Quote not found for symbol: WBA"}}}
+$WBA: possibly delisted; no price data found  (period=1y) (Yahoo error = "No data found, symbol may be delisted")
+$WBA: possibly delisted; no price data found  (period=1y) (Yahoo error = "No data found, symbol may be delisted")
+$WBA: possibly delisted; no timezone found
+$WBA: possibly delisted; no timezone found
+127.0.0.1 - - [24/Jan/2026 17:27:06] "GET /api/snapshot HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:27:06] "GET /api/snapshot HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:29:37] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:29:37] "GET /manifest.json HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:29:38] "GET /sw.js HTTP/1.1" 200 -
+$WBA: possibly delisted; no price data found  (period=1y) (Yahoo error = "No data found, symbol may be delisted")
+$WBA: possibly delisted; no price data found  (period=1y) (Yahoo error = "No data found, symbol may be delisted")
+$WBA: possibly delisted; no timezone found
+$WBA: possibly delisted; no timezone found
+127.0.0.1 - - [24/Jan/2026 17:29:40] "GET /api/snapshot HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:29:40] "GET /api/snapshot HTTP/1.1" 200 -
