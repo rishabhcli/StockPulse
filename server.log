@@ -448,3 +448,8 @@ $WBA: possibly delisted; no timezone found
 $WBA: possibly delisted; no timezone found
 127.0.0.1 - - [24/Jan/2026 17:29:40] "GET /api/snapshot HTTP/1.1" 200 -
 127.0.0.1 - - [24/Jan/2026 17:29:40] "GET /api/snapshot HTTP/1.1" 200 -
+127.0.0.1 - - [24/Jan/2026 17:32:40] "GET /health HTTP/1.1" 200 -
+/Users/rishabhbansal/miniconda3/lib/python3.13/multiprocessing/resource_tracker.py:400: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown: {'/mp-o1i6fbnk'}
+  warnings.warn(
+/Users/rishabhbansal/miniconda3/lib/python3.13/multiprocessing/resource_tracker.py:400: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown: {'/mp-gy7yq1es'}
+  warnings.warn(
