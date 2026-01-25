@@ -70,7 +70,7 @@ cd frontend && npm run build
 
 This project is optimized for [Daytona](https://www.daytona.io/).
 ```bash
-daytona create https://github.com/rishirevuri/Daytona_trading_agent
+daytona create https://github.com/rishabhbansal/StockPulse
 ```
 
 ## API Endpoints

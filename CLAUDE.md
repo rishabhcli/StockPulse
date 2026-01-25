@@ -55,7 +55,7 @@ docker-compose down            # Stop
 ```bash
 daytona create .
 # Or from GitHub:
-daytona create https://github.com/rishirevuri/Daytona_trading_agent
+daytona create https://github.com/rishabhbansal/StockPulse
 ```
 
 ## Architecture
