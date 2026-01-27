@@ -189,12 +189,27 @@ const styles = StyleSheet.create({
     backgroundColor: Platform.select({
       ios: colors.ios.glassRegular,
       android: colors.android.surfaceContainer,
-      default: colors.surface,
+      default: colors.web.glassBackground,
     }),
     borderRadius: borderRadius.xl,
     padding: spacing.md,
-    borderWidth: Platform.OS === 'ios' ? 1 : 0,
-    borderColor: colors.ios.glassBorderMedium,
+    ...Platform.select({
+      ios: {
+        borderWidth: 1,
+        borderColor: colors.ios.glassBorderMedium,
+      },
+      android: {
+        elevation: 1,
+        borderWidth: 0,
+        borderColor: 'transparent',
+      },
+      default: {
+        borderWidth: 1,
+        borderColor: colors.web.glassBorder,
+        backdropFilter: 'blur(12px)',
+        WebkitBackdropFilter: 'blur(12px)',
+      },
+    } as any),
   },
   cardSkeletonFull: {
     padding: spacing.md,

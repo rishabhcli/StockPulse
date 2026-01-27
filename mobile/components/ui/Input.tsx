@@ -144,6 +144,7 @@ export function Input({
             styles.inputContainer,
             getVariantStyles(),
             Platform.OS === 'ios' && styles.inputContainerIOS,
+          Platform.OS === 'web' && styles.inputContainerWeb,
             animatedBorderStyle,
             error && styles.inputContainerError,
           ]}
@@ -232,6 +233,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.ios.glassRegular,
     borderColor: colors.ios.glassBorderMedium,
   },
+  inputContainerWeb: {
+    backgroundColor: colors.web.glassBackground,
+    borderColor: colors.web.glassBorder,
+    backdropFilter: 'blur(12px)',
+    WebkitBackdropFilter: 'blur(12px)',
+  } as any,
   inputContainerError: {
     borderColor: colors.error,
   },

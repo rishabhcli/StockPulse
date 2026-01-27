@@ -116,6 +116,7 @@ export function PriceDisplay({
           { paddingHorizontal: paddings.chip, paddingVertical: paddings.chip - 2 },
           Platform.OS === 'ios' && styles.changeContainerIOS,
           Platform.OS === 'android' && styles.changeContainerAndroid,
+          Platform.OS === 'web' && styles.changeContainerWeb,
         ]}
       >
         <Ionicons
@@ -172,11 +173,19 @@ const styles = StyleSheet.create({
   },
   changeContainerIOS: {
     borderWidth: 1,
-    borderColor: 'transparent',
+    borderColor: colors.ios.glassBorderMedium,
+    backgroundColor: undefined,
   },
   changeContainerAndroid: {
-    elevation: 0,
+    elevation: 1,
+    borderRadius: borderRadius.lg,
   },
+  changeContainerWeb: {
+    backdropFilter: 'blur(8px)',
+    WebkitBackdropFilter: 'blur(8px)',
+    borderWidth: 1,
+    borderColor: colors.web.glassBorder,
+  } as any,
   changeText: {
     fontWeight: '600',
     marginLeft: 2,

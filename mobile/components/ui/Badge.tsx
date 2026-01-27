@@ -1,5 +1,6 @@
 import React from 'react';
 import { Platform, View, Text, StyleSheet, ViewStyle } from 'react-native';
+import { Badge as PaperBadge } from 'react-native-paper';
 import { colors, borderRadius, spacing, fontSize } from '../../constants/theme';
 
 // ============================================================================
@@ -82,6 +83,8 @@ export function Badge({
     badgeStyle.push(styles.iosBadge);
   } else if (Platform.OS === 'android') {
     badgeStyle.push(styles.androidBadge);
+  } else if (Platform.OS === 'web') {
+    badgeStyle.push(styles.webBadge);
   }
 
   return (
@@ -150,16 +153,26 @@ const styles = StyleSheet.create({
 
   // Platform-specific
   iosBadge: {
-    // Subtle shadow for iOS
+    // iOS glass-tinted badge with subtle depth
+    borderWidth: 1,
+    borderColor: colors.ios.glassBorderMedium,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
   },
   androidBadge: {
-    // M3 uses slightly more rounded badges
+    // M3 tonal badge with pill shape
     elevation: 0,
+    borderRadius: borderRadius.lg,
   },
+  webBadge: {
+    // Web glassmorphism badge
+    backdropFilter: 'blur(8px)',
+    WebkitBackdropFilter: 'blur(8px)',
+    borderWidth: 1,
+    borderColor: colors.web.glassBorder,
+  } as any,
 });
 
 export default Badge;

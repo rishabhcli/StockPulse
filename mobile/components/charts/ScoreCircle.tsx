@@ -88,17 +88,18 @@ export function ScoreCircle({
 
   return (
     <View style={[styles.container, { width: size, height: size }]}>
-      {/* Glow Effect (Behind) */}
+      {/* Glow Effect (Behind) — platform-specific intensity */}
       {showGlow && (
         <Animated.View
           style={[
             styles.glow,
             {
-              width: size * 1.3,
-              height: size * 1.3,
-              borderRadius: (size * 1.3) / 2,
+              width: size * (Platform.OS === 'ios' ? 1.4 : 1.25),
+              height: size * (Platform.OS === 'ios' ? 1.4 : 1.25),
+              borderRadius: (size * 1.4) / 2,
               backgroundColor: scoreColor,
             },
+            Platform.OS === 'android' && styles.glowAndroid,
             glowAnimatedStyle,
           ]}
           pointerEvents="none"
@@ -120,7 +121,11 @@ export function ScoreCircle({
           cx={size / 2}
           cy={size / 2}
           r={radius}
-          stroke={Platform.OS === 'ios' ? colors.ios.glassBorderMedium : colors.android.outlineVariant}
+          stroke={Platform.select({
+            ios: colors.ios.glassBorderMedium,
+            android: colors.android.outlineVariant,
+            default: colors.web.glassBorder,
+          })}
           strokeWidth={strokeWidth}
           fill="none"
           opacity={0.5}
@@ -146,7 +151,11 @@ export function ScoreCircle({
           cx={size / 2}
           cy={size / 2}
           r={radius - strokeWidth - 4}
-          stroke={Platform.OS === 'ios' ? colors.ios.glassBorderLight : colors.border}
+          stroke={Platform.select({
+            ios: colors.ios.glassBorderLight,
+            android: colors.android.outlineVariant,
+            default: colors.web.glassBorder,
+          })}
           strokeWidth={1}
           fill="none"
           opacity={0.3}
@@ -192,7 +201,11 @@ export function MiniScoreCircle({ score, size = 48 }: MiniScoreCircleProps) {
           cx={size / 2}
           cy={size / 2}
           r={radius}
-          stroke={colors.border}
+          stroke={Platform.select({
+            ios: colors.ios.glassBorderMedium,
+            android: colors.android.outlineVariant,
+            default: colors.border,
+          })}
           strokeWidth={strokeWidth}
           fill="none"
           opacity={0.3}
@@ -232,6 +245,10 @@ const styles = StyleSheet.create({
   glow: {
     position: 'absolute',
     opacity: 0,
+  },
+  glowAndroid: {
+    // Android uses elevation instead of blur for glow
+    elevation: 8,
   },
   labelContainer: {
     position: 'absolute',
