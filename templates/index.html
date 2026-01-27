@@ -370,6 +370,16 @@
         color: var(--text-secondary);
         font-size: 0.875rem;
       }
+      .mover-dollar-change {
+        font-weight: 500;
+        font-size: 0.8rem;
+      }
+      .mover-dollar-change.up {
+        color: var(--positive);
+      }
+      .mover-dollar-change.down {
+        color: var(--negative);
+      }
       .mover-change {
         font-weight: 600;
         font-size: 0.875rem;
@@ -2576,6 +2586,7 @@
             const rawPrice = m.current_price;
             const price = typeof rawPrice === "number" ? rawPrice.toFixed(2) : "--";
             const changePct = m.change_pct ?? 0;
+            const dollarChange = m.dollar_change ?? 0;
             const changeClass = changePct >= 0 ? "up" : "down";
             const sign = changePct >= 0 ? "+" : "";
             return (
@@ -2585,6 +2596,11 @@
               ticker +
               '</span><span class="mover-price">$' +
               price +
+              '</span><span class="mover-dollar-change ' +
+              changeClass +
+              '">' +
+              sign + '$' +
+              Math.abs(dollarChange).toFixed(2) +
               '</span><span class="mover-change ' +
               changeClass +
               '">' +
@@ -3354,8 +3370,9 @@
           }
           results.classList.add("active");
         } catch (error) {
+          console.error('Analysis error:', error);
           results.innerHTML =
-            '<div class="error">Error analyzing stock. Please try again.</div>';
+            '<div class="error">Error analyzing stock: ' + (error.message || 'Please try again.') + '</div>';
           results.classList.add("active");
         } finally {
           btn.disabled = false;
@@ -3793,14 +3810,26 @@
       }
 
       function displayResults(data) {
+        // Defensive checks for required fields
+        if (!data || typeof data.score !== 'number') {
+          throw new Error('Invalid response: missing score');
+        }
+
+        // Defensive fallbacks for all nested objects
+        const indicators = data.indicators || {};
+        const fundamentals = data.fundamentals || {};
+        const priceTargets = data.price_targets || {};
+        const individualScores = data.individual_scores || {};
+        const earnings = data.earnings || {};
+
         const scoreColor = getScoreColor(data.score);
-        const recClass = data.recommendation.toLowerCase().replace(" ", "-");
+        const recClass = (data.recommendation || 'HOLD').toLowerCase().replace(" ", "-");
         const circumference = 2 * Math.PI * 70;
         const offset = circumference - (data.score / 100) * circumference;
         const isLong = data.action === "long";
 
         let indicatorsHTML = "";
-        for (const [key, score] of Object.entries(data.individual_scores)) {
+        for (const [key, score] of Object.entries(individualScores)) {
           const color = getScoreColor(score);
           const tooltipHTML = buildTooltip(key, true);
           indicatorsHTML +=
@@ -3822,35 +3851,35 @@
         // Build technical indicators panel with tooltips
         const techPanel =
           '<div class="panel"><div class="panel-header"><span class="panel-title">Technical Indicators</span></div><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">' +
-          wrapTerm("RSI", data.indicators.RSI, false) +
-          wrapTerm("MACD", data.indicators.MACD, false) +
-          wrapTerm("Stochastic %K", data.indicators.Stochastic_K, false) +
-          wrapTerm("Williams %R", data.indicators.Williams_R, false) +
-          wrapTerm("CCI", data.indicators.CCI, false) +
-          wrapTerm("VIX", data.indicators.VIX, false) +
+          wrapTerm("RSI", indicators.RSI, false) +
+          wrapTerm("MACD", indicators.MACD, false) +
+          wrapTerm("Stochastic %K", indicators.Stochastic_K, false) +
+          wrapTerm("Williams %R", indicators.Williams_R, false) +
+          wrapTerm("CCI", indicators.CCI, false) +
+          wrapTerm("VIX", indicators.VIX, false) +
           "</div></div>";
 
         // Build moving averages panel with tooltips
         const maPanel =
           '<div class="panel"><div class="panel-header"><span class="panel-title">Moving Averages & Fundamentals</span></div><div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">' +
-          wrapTerm("SMA 20", data.indicators.SMA_20, true) +
-          wrapTerm("SMA 50", data.indicators.SMA_50, true) +
-          wrapTerm("SMA 200", data.indicators.SMA_200, true) +
+          wrapTerm("SMA 20", indicators.SMA_20, true) +
+          wrapTerm("SMA 50", indicators.SMA_50, true) +
+          wrapTerm("SMA 200", indicators.SMA_200, true) +
           wrapTerm(
             "Market Cap",
-            data.fundamentals.market_cap
-              ? formatNumber(data.fundamentals.market_cap)
+            fundamentals.market_cap
+              ? formatNumber(fundamentals.market_cap)
               : "N/A",
             true,
           ) +
           wrapTerm(
             "P/E Ratio",
-            typeof data.fundamentals.pe_ratio === "number"
-              ? data.fundamentals.pe_ratio.toFixed(2)
+            typeof fundamentals.pe_ratio === "number"
+              ? fundamentals.pe_ratio.toFixed(2)
               : "N/A",
             false,
           ) +
-          wrapTerm("Dividend", data.fundamentals.dividend_yield + "%", false) +
+          wrapTerm("Dividend", (fundamentals.dividend_yield || 0) + "%", false) +
           "</div></div>";
 
         // Build earnings panel
@@ -3859,7 +3888,6 @@
           data.ticker +
           '/earnings" target="_blank" style="font-size: 0.75rem; color: var(--text-secondary); text-decoration: none;">View Details →</a></div>';
 
-        const earnings = data.earnings || {};
         const earningsHistory = earnings.earnings_history || [];
         const nextEarningsDate = earnings.earnings_date;
         const avgSurprise = earnings.earnings_surprise_avg || 0;
@@ -3976,13 +4004,13 @@
 
         document.getElementById("results").innerHTML =
           '<div class="score-hero"><div class="score-company"><h2>' +
-          data.company_name +
+          (data.company_name || 'Unknown') +
           '</h2><div class="ticker">' +
-          data.ticker +
+          (data.ticker || '') +
           '</div><div class="sector">' +
-          data.sector +
+          (data.sector || 'N/A') +
           " / " +
-          data.industry +
+          (data.industry || 'N/A') +
           '</div></div><div class="score-value"><div class="score-circle"><svg viewBox="0 0 160 160"><circle class="track" cx="80" cy="80" r="70"/><circle class="progress" cx="80" cy="80" r="70" stroke="' +
           scoreColor +
           '" stroke-dasharray="' +
@@ -3996,28 +4024,28 @@
           '</span></div><div class="score-label">Investment Score</div><div class="recommendation ' +
           recClass +
           '">' +
-          data.recommendation +
+          (data.recommendation || 'HOLD') +
           "</div></div></div>" +
           '<div class="metrics-grid"><div class="metric-cell"><div class="label">Current Price</div><div class="value">$' +
-          data.current_price +
+          (data.current_price || 'N/A') +
           '</div></div><div class="metric-cell"><div class="label">52W High</div><div class="value up">$' +
-          data.fundamentals["52_week_high"] +
+          (fundamentals["52_week_high"] || 'N/A') +
           '</div></div><div class="metric-cell"><div class="label">52W Low</div><div class="value down">$' +
-          data.fundamentals["52_week_low"] +
+          (fundamentals["52_week_low"] || 'N/A') +
           '</div></div><div class="metric-cell"><div class="label">' +
           (isLong ? "Target" : "Cover Target") +
           '</div><div class="value up">$' +
           (isLong
-            ? data.price_targets.long_target_2
-            : data.price_targets.short_target_2) +
+            ? (priceTargets.long_target_2 || 'N/A')
+            : (priceTargets.short_target_2 || 'N/A')) +
           '</div></div><div class="metric-cell"><div class="label">Stop Loss</div><div class="value down">$' +
           (isLong
-            ? data.price_targets.long_stop_loss
-            : data.price_targets.short_stop_loss) +
+            ? (priceTargets.long_stop_loss || 'N/A')
+            : (priceTargets.short_stop_loss || 'N/A')) +
           '</div></div><div class="metric-cell"><div class="label term-wrap">ATR' +
           buildTooltip("ATR", false) +
           '</div><div class="value">$' +
-          data.indicators.ATR +
+          (indicators.ATR || 'N/A') +
           "</div></div></div>" +
           buildCandlestickChartSection(data.ticker) +
           (data.candlestick_analysis ? buildTrendPanel(data.candlestick_analysis) : '') +

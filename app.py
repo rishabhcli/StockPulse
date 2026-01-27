@@ -12,6 +12,15 @@ import re
 from collections import defaultdict
 import time
 import threading
+import logging
+
+# ============== FEATURE FLAGS ==============
+# v2 layered scoring is now the default
+USE_LAYERED_SCORING = os.environ.get('USE_LAYERED_SCORING', 'true').lower() == 'true'
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__, static_folder='static', static_url_path='')
 
@@ -2560,6 +2569,7 @@ def calculate_investment_score(ticker_symbol):
         current_price = close.iloc[-1]
         prev_close = close.iloc[-2] if len(close) > 1 else current_price
         change_pct = ((current_price - prev_close) / prev_close) * 100 if prev_close else 0
+        dollar_change = current_price - prev_close
 
         # Get market sentiment
         vix = get_vix()
@@ -2864,6 +2874,7 @@ def calculate_investment_score(ticker_symbol):
             'industry': industry,
             'current_price': round(current_price, 2),
             'change_pct': round(change_pct, 2),
+            'dollar_change': round(dollar_change, 2),
             'score': final_score,
             'technical_score': round(technical_score, 1),
             'fundamental_score': round(fund_score, 1),
@@ -2997,6 +3008,7 @@ def screen_stocks(filter_type='all', limit=20, tickers=None):
                     'recommendation': result['recommendation'],
                     'current_price': result['current_price'],
                     'change_pct': result.get('change_pct', 0),
+                    'dollar_change': result.get('dollar_change', 0),
                     'rsi': result['indicators'].get('RSI', 0),
                     'confidence': result['confidence']
                 }
@@ -3036,6 +3048,205 @@ def screen_stocks(filter_type='all', limit=20, tickers=None):
     return results[:limit]
 
 
+# ============== V2 LAYERED SCORING SYSTEM ==============
+
+def calculate_investment_score_v2(ticker_symbol):
+    """
+    Calculate investment score using the new 5-layer conviction-based system.
+
+    This is an alternative to calculate_investment_score() that uses:
+    - Layer 1: Quality Gate (pass/fail filter)
+    - Layer 2: Intrinsic Value (DCF, peer comparison)
+    - Layer 3: Market Regime (risk-on/off adjustment)
+    - Layer 4: Technical Confluence (signal clustering)
+    - Layer 5: Catalyst (upcoming events)
+
+    Returns a dict compatible with the v1 API response format.
+    """
+    try:
+        from analyzers.score_combiner import ScoreCombiner
+        from data.fetchers import get_all_stock_data, get_cached_financials
+
+        # Get all stock data
+        stock_data = get_all_stock_data(ticker_symbol)
+
+        if not stock_data or stock_data.get('error'):
+            # Fall back to v1 if data fetch fails
+            logger.warning(f"V2 data fetch failed for {ticker_symbol}, falling back to v1")
+            return calculate_investment_score(ticker_symbol)
+
+        # Fetch extended data sources (v2.1)
+        stock_data = _fetch_extended_data(ticker_symbol, stock_data)
+
+        # Get market data for regime analysis (now includes economic context)
+        market_data = _get_market_data_for_v2()
+
+        # Run the layered analysis
+        combiner = ScoreCombiner()
+        conviction_result = combiner.calculate_conviction_score(
+            ticker_symbol,
+            stock_data,
+            market_data
+        )
+
+        # Build v1-compatible response
+        v2_response = conviction_result.to_v1_compatible_dict()
+
+        # Merge with v1 data for backward compatibility
+        v1_result = calculate_investment_score(ticker_symbol)
+
+        if 'error' not in v1_result:
+            # Keep all v1 fields but override scoring fields with v2
+            merged = v1_result.copy()
+            merged['score'] = v2_response['score']
+            merged['recommendation'] = v2_response['recommendation']
+            merged['action'] = v2_response['action']
+            merged['scoring_version'] = 'v2'
+
+            # Add v2-specific fields
+            merged['layer_analysis'] = v2_response.get('layer_analysis', {})
+            merged['agreement_level'] = v2_response.get('agreement_level', 0.5)
+            merged['confidence'] = v2_response.get('confidence', 'MEDIUM')
+            merged['explanation'] = v2_response.get('explanation', '')
+            merged['quality_passed'] = v2_response.get('quality_passed', True)
+            merged['quality_warnings'] = v2_response.get('quality_warnings', [])
+
+            # Add extended data fields (v2.1)
+            extended_data = {}
+            if 'insider_trading' in stock_data:
+                extended_data['insider_trading'] = stock_data['insider_trading'].to_dict() if hasattr(stock_data['insider_trading'], 'to_dict') else {}
+            if 'short_interest' in stock_data:
+                extended_data['short_interest'] = stock_data['short_interest'].to_dict() if hasattr(stock_data['short_interest'], 'to_dict') else {}
+            if 'relative_strength' in stock_data:
+                extended_data['relative_strength'] = stock_data['relative_strength'].to_dict() if hasattr(stock_data['relative_strength'], 'to_dict') else {}
+            if extended_data:
+                merged['extended_data'] = extended_data
+
+            # Record score for backtesting (v2.1)
+            try:
+                from data.backtester import record_score
+                price = merged.get('current_price') or merged.get('price', 0)
+                if price and merged['score']:
+                    record_score(ticker_symbol, merged['score'], price)
+            except Exception as e:
+                logger.debug(f"Score recording failed for {ticker_symbol}: {e}")
+
+            return merged
+
+        # v1 failed but v2 succeeded - add stub data for frontend compatibility
+        v2_response['indicators'] = {}
+        v2_response['fundamentals'] = {}
+        v2_response['individual_scores'] = {}
+        v2_response['price_targets'] = {}
+        v2_response['earnings'] = {}
+        v2_response['company_name'] = ticker_symbol
+        v2_response['ticker'] = ticker_symbol
+        v2_response['sector'] = 'N/A'
+        v2_response['industry'] = 'N/A'
+        v2_response['current_price'] = 0
+        return v2_response
+
+    except ImportError as e:
+        logger.error(f"V2 scoring import error: {e}")
+        return calculate_investment_score(ticker_symbol)
+    except Exception as e:
+        logger.error(f"V2 scoring error for {ticker_symbol}: {e}")
+        return calculate_investment_score(ticker_symbol)
+
+
+def _fetch_extended_data(ticker_symbol, stock_data):
+    """
+    Fetch extended data sources for v2.1 scoring.
+
+    Adds insider trading, short interest, and relative strength data.
+    These are optional - scoring will work without them but with lower confidence.
+    """
+    try:
+        # Insider trading from SEC EDGAR / yfinance
+        try:
+            from data.insider_trading import get_insider_trading
+            insider_result = get_insider_trading(ticker_symbol)
+            stock_data['insider_trading'] = insider_result
+        except Exception as e:
+            logger.debug(f"Insider trading fetch failed for {ticker_symbol}: {e}")
+
+        # Short interest from yfinance/FINRA
+        try:
+            from data.short_interest import get_short_interest
+            short_result = get_short_interest(ticker_symbol)
+            stock_data['short_interest'] = short_result
+        except Exception as e:
+            logger.debug(f"Short interest fetch failed for {ticker_symbol}: {e}")
+
+        # Relative strength vs sector
+        try:
+            from data.relative_strength import get_relative_strength
+            sector = stock_data.get('info', {}).get('sector', '')
+            rs_result = get_relative_strength(ticker_symbol, sector=sector, info=stock_data.get('info'))
+            stock_data['relative_strength'] = rs_result
+        except Exception as e:
+            logger.debug(f"Relative strength fetch failed for {ticker_symbol}: {e}")
+
+    except Exception as e:
+        logger.warning(f"Extended data fetch error for {ticker_symbol}: {e}")
+
+    return stock_data
+
+
+def _get_market_data_for_v2():
+    """Get market-wide data for regime analysis (includes economic context)."""
+    try:
+        market_data = {}
+
+        # Get VIX
+        vix = get_vix()
+        market_data['vix'] = vix if vix else 20.0
+
+        # Get SPY data
+        spy_hist = get_cached_history('SPY', period='3mo')
+        if spy_hist is not None and not spy_hist.empty:
+            close = spy_hist['Close']
+            market_data['spy'] = {
+                'price': close.iloc[-1],
+                'sma_20': close.rolling(20).mean().iloc[-1] if len(close) >= 20 else close.mean(),
+                'sma_50': close.rolling(50).mean().iloc[-1] if len(close) >= 50 else close.mean(),
+                'sma_200': close.rolling(200).mean().iloc[-1] if len(close) >= 200 else close.mean(),
+                'change_1m': ((close.iloc[-1] / close.iloc[-22]) - 1) * 100 if len(close) >= 22 else 0
+            }
+
+        # Get QQQ data
+        qqq_hist = get_cached_history('QQQ', period='3mo')
+        if qqq_hist is not None and not qqq_hist.empty:
+            close = qqq_hist['Close']
+            market_data['qqq'] = {
+                'price': close.iloc[-1],
+                'change_1m': ((close.iloc[-1] / close.iloc[-22]) - 1) * 100 if len(close) >= 22 else 0
+            }
+
+        # Get IWM data (small caps)
+        iwm_hist = get_cached_history('IWM', period='3mo')
+        if iwm_hist is not None and not iwm_hist.empty:
+            close = iwm_hist['Close']
+            market_data['iwm'] = {
+                'price': close.iloc[-1],
+                'change_1m': ((close.iloc[-1] / close.iloc[-22]) - 1) * 100 if len(close) >= 22 else 0
+            }
+
+        # Get economic context from FRED (v2.1)
+        try:
+            from data.economic_calendar import get_economic_context
+            economic_result = get_economic_context()
+            market_data['economic_context'] = economic_result
+        except Exception as e:
+            logger.debug(f"Economic context fetch failed: {e}")
+
+        return market_data
+
+    except Exception as e:
+        logger.warning(f"Error getting market data for v2: {e}")
+        return {'vix': 20.0}
+
+
 # API Routes
 @app.route('/')
 def index():
@@ -3060,6 +3271,7 @@ def service_worker():
 def analyze():
     data = request.json
     ticker = data.get('ticker', '').strip()
+    scoring_version = data.get('scoring', request.args.get('scoring', 'auto'))
 
     if not ticker:
         return jsonify({"error": "Please enter a ticker symbol"})
@@ -3067,7 +3279,16 @@ def analyze():
     # Normalize ticker to handle index symbols (add ^ prefix if needed)
     ticker = normalize_ticker(ticker)
 
-    result = calculate_investment_score(ticker)
+    # Determine which scoring system to use
+    # 'v2' = force new layered system
+    # 'v1' = force original system
+    # 'auto' = use feature flag
+    if scoring_version == 'v2' or (scoring_version == 'auto' and USE_LAYERED_SCORING):
+        result = calculate_investment_score_v2(ticker)
+    else:
+        result = calculate_investment_score(ticker)
+        result['scoring_version'] = 'v1'
+
     return jsonify(result)
 
 @app.route('/api/screen', methods=['GET'])
@@ -3085,6 +3306,161 @@ def screen():
 @app.route('/api/market-sentiment', methods=['GET'])
 def sentiment():
     return jsonify(get_market_sentiment())
+
+
+@app.route('/api/reddit-sentiment', methods=['GET'])
+def reddit_sentiment():
+    """
+    Get Reddit sentiment for a ticker.
+
+    Query params:
+        ticker: Stock symbol (required)
+        time: Time filter - 'day', 'week', 'month' (default: 'week')
+
+    Returns:
+        Reddit sentiment analysis including mention counts, sentiment scores,
+        and top posts from r/wallstreetbets, r/stocks, etc.
+    """
+    ticker = request.args.get('ticker', '').strip().upper()
+    time_filter = request.args.get('time', 'week')
+
+    if not ticker:
+        return jsonify({"error": "Please provide a ticker parameter"}), 400
+
+    if time_filter not in ['day', 'week', 'month']:
+        time_filter = 'week'
+
+    try:
+        from data.reddit_sentiment import get_reddit_sentiment
+        result = get_reddit_sentiment(ticker, time_filter)
+        return jsonify(result.to_dict())
+    except ImportError:
+        return jsonify({"error": "Reddit sentiment module not available"}), 500
+    except Exception as e:
+        logger.error(f"Reddit sentiment error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/insider-trading', methods=['GET'])
+def get_insider_trading_api():
+    """Get insider trading data for a ticker from SEC EDGAR / yfinance"""
+    ticker = request.args.get('ticker', '').strip().upper()
+    days = request.args.get('days', 90, type=int)
+
+    if not ticker:
+        return jsonify({"error": "Please provide a ticker parameter"}), 400
+
+    try:
+        from data.insider_trading import get_insider_trading
+        result = get_insider_trading(ticker, days=days)
+        return jsonify(result.to_dict())
+    except ImportError:
+        return jsonify({"error": "Insider trading module not available"}), 500
+    except Exception as e:
+        logger.error(f"Insider trading error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/short-interest', methods=['GET'])
+def get_short_interest_api():
+    """Get short interest data for a ticker"""
+    ticker = request.args.get('ticker', '').strip().upper()
+
+    if not ticker:
+        return jsonify({"error": "Please provide a ticker parameter"}), 400
+
+    try:
+        from data.short_interest import get_short_interest
+        result = get_short_interest(ticker)
+        return jsonify(result.to_dict())
+    except ImportError:
+        return jsonify({"error": "Short interest module not available"}), 500
+    except Exception as e:
+        logger.error(f"Short interest error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/relative-strength', methods=['GET'])
+def get_relative_strength_api():
+    """Get relative strength vs sector for a ticker"""
+    ticker = request.args.get('ticker', '').strip().upper()
+
+    if not ticker:
+        return jsonify({"error": "Please provide a ticker parameter"}), 400
+
+    try:
+        from data.relative_strength import get_relative_strength
+        # Try to get sector from yfinance
+        info = {}
+        try:
+            t = yf.Ticker(ticker)
+            info = t.info or {}
+        except:
+            pass
+
+        result = get_relative_strength(ticker, info=info)
+        return jsonify(result.to_dict())
+    except ImportError:
+        return jsonify({"error": "Relative strength module not available"}), 500
+    except Exception as e:
+        logger.error(f"Relative strength error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/economic-context', methods=['GET'])
+def get_economic_context_api():
+    """Get economic context from FRED API"""
+    try:
+        from data.economic_calendar import get_economic_context
+        result = get_economic_context()
+        return jsonify(result.to_dict())
+    except ImportError:
+        return jsonify({"error": "Economic calendar module not available"}), 500
+    except Exception as e:
+        logger.error(f"Economic context error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/backtest', methods=['GET'])
+def get_backtest_api():
+    """Get backtesting performance report"""
+    period = request.args.get('period', '1M')
+
+    if period not in ['1W', '1M', '3M', '6M', 'ALL']:
+        period = '1M'
+
+    try:
+        from data.backtester import get_performance_report
+        result = get_performance_report(period)
+        return jsonify(result.to_dict())
+    except ImportError:
+        return jsonify({"error": "Backtester module not available"}), 500
+    except Exception as e:
+        logger.error(f"Backtest error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/backtest/record', methods=['POST'])
+def record_score_api():
+    """Record a score for backtesting (called after analysis)"""
+    data = request.json
+    ticker = data.get('ticker', '').strip().upper()
+    score = data.get('score')
+    price = data.get('price')
+
+    if not ticker or score is None or price is None:
+        return jsonify({"error": "Please provide ticker, score, and price"}), 400
+
+    try:
+        from data.backtester import record_score
+        result = record_score(ticker, float(score), float(price))
+        return jsonify(result.to_dict())
+    except ImportError:
+        return jsonify({"error": "Backtester module not available"}), 500
+    except Exception as e:
+        logger.error(f"Record score error: {e}")
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route('/api/speak', methods=['POST'])
 def speak():

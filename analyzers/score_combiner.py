@@ -1,0 +1,607 @@
+"""
+Score Combiner: Final Conviction-Based Scoring
+
+Combines all 5 layers into a final investment score using
+conviction-based logic rather than weighted averaging.
+
+Scoring Logic:
+1. Quality Gate filter (fail = cap at 40)
+2. Layer agreement analysis
+3. Regime-adjusted base scoring
+4. Catalyst uncertainty adjustment
+5. Conviction confidence calculation
+
+Extended Data Sources (v2.1):
+- Insider trading (SEC EDGAR)
+- Short interest (FINRA/yfinance)
+- Relative strength (vs sector)
+- Economic context (FRED API)
+"""
+
+from typing import Dict, Any, Optional, List, Tuple
+import logging
+
+from analyzers.base import BaseAnalyzer
+from analyzers.quality_gate import QualityGateAnalyzer
+from analyzers.intrinsic_value import IntrinsicValueAnalyzer
+from analyzers.market_regime import MarketRegimeAnalyzer
+from analyzers.technical_confluence import TechnicalConfluenceAnalyzer
+from analyzers.catalyst import CatalystAnalyzer
+
+from models.results import (
+    QualityGateResult,
+    IntrinsicValueResult,
+    MarketRegimeResult,
+    TechnicalConfluenceResult,
+    CatalystResult,
+    ConvictionScore,
+    LayerResults
+)
+
+logger = logging.getLogger(__name__)
+
+
+class ScoreCombiner:
+    """
+    Combines all layer results into a final conviction score.
+
+    Unlike traditional weighted averaging, this uses conviction-based
+    logic where layer agreement and regime context matter more than
+    individual indicator values.
+    """
+
+    # Score thresholds for recommendations
+    STRONG_BUY_THRESHOLD = 75
+    BUY_THRESHOLD = 60
+    HOLD_THRESHOLD = 45
+    SELL_THRESHOLD = 30
+
+    # Quality gate failure cap
+    QUALITY_FAIL_CAP = 40
+
+    # Agreement bonuses/penalties
+    STRONG_AGREEMENT_BONUS = 15
+    MODERATE_AGREEMENT_BONUS = 8
+    CONFLICT_PENALTY = 10
+    MAJOR_CONFLICT_PENALTY = 15
+
+    # Catalyst adjustments
+    IMMINENT_CATALYST_UNCERTAINTY = 8
+    NEAR_CATALYST_UNCERTAINTY = 5
+
+    # Insider trading adjustments
+    CLUSTER_BUYING_BONUS = 10  # 3+ insiders buying
+    EXECUTIVE_BUYING_BONUS = 5  # CEO/CFO buying
+    HEAVY_SELLING_PENALTY = 5  # Heavy insider selling
+
+    # Short interest adjustments
+    SQUEEZE_POTENTIAL_BONUS = 5  # High short + rising price
+    CROWDED_SHORT_FLAG = 5  # >20% of float shorted
+
+    # Relative strength adjustments
+    OUTPERFORMING_BONUS = 5  # RS > +5% vs sector
+    UNDERPERFORMING_PENALTY = 5  # RS < -5% vs sector
+
+    def __init__(self):
+        """Initialize all layer analyzers."""
+        self.quality_gate = QualityGateAnalyzer()
+        self.intrinsic_value = IntrinsicValueAnalyzer()
+        self.market_regime = MarketRegimeAnalyzer()
+        self.technical_confluence = TechnicalConfluenceAnalyzer()
+        self.catalyst = CatalystAnalyzer()
+
+    def analyze_all_layers(
+        self,
+        ticker: str,
+        stock_data: Dict[str, Any],
+        market_data: Dict[str, Any]
+    ) -> LayerResults:
+        """
+        Run all 5 layers of analysis.
+
+        Args:
+            ticker: Stock symbol
+            stock_data: Dict with 'info', 'financials', 'history', 'news', 'calendar'
+            market_data: Dict with 'spy', 'qqq', 'iwm', 'vix' data
+
+        Returns:
+            LayerResults containing all layer outputs
+        """
+        # Layer 1: Quality Gate
+        quality_result = self.quality_gate.analyze(ticker, {
+            'info': stock_data.get('info', {}),
+            'financials': stock_data.get('financials', {})
+        })
+
+        # Layer 2: Intrinsic Value
+        value_result = self.intrinsic_value.analyze(ticker, {
+            'info': stock_data.get('info', {}),
+            'financials': stock_data.get('financials', {}),
+            'history': stock_data.get('history')
+        })
+
+        # Layer 3: Market Regime
+        regime_result = self.market_regime.analyze(ticker, {
+            'market_data': market_data
+        })
+
+        # Layer 4: Technical Confluence
+        technical_result = self.technical_confluence.analyze(ticker, {
+            'history': stock_data.get('history'),
+            'info': stock_data.get('info', {})
+        })
+
+        # Layer 5: Catalyst
+        catalyst_result = self.catalyst.analyze(ticker, {
+            'info': stock_data.get('info', {}),
+            'news': stock_data.get('news', []),
+            'calendar': stock_data.get('calendar')
+        })
+
+        return LayerResults(
+            quality_gate=quality_result,
+            intrinsic_value=value_result,
+            market_regime=regime_result,
+            technical_confluence=technical_result,
+            catalyst=catalyst_result
+        )
+
+    def calculate_conviction_score(
+        self,
+        ticker: str,
+        stock_data: Dict[str, Any],
+        market_data: Dict[str, Any]
+    ) -> ConvictionScore:
+        """
+        Calculate the final conviction score from all layers.
+
+        This is the main entry point for the v2 scoring system.
+
+        Args:
+            ticker: Stock symbol
+            stock_data: Complete stock data dict
+            market_data: Market-wide data dict
+
+        Returns:
+            ConvictionScore with final score, recommendation, and explanation
+        """
+        # Run all layers
+        layers = self.analyze_all_layers(ticker, stock_data, market_data)
+
+        # 1. Check quality gate first
+        if not layers.quality_gate.passed:
+            return self._create_quality_fail_score(ticker, layers)
+
+        # 2. Calculate base score from value and technical
+        base_score = self._calculate_base_score(layers)
+
+        # 3. Apply layer agreement adjustment
+        agreement_adj, agreement_level = self._calculate_agreement_adjustment(layers)
+
+        # 4. Apply regime adjustment
+        regime_adj = self._calculate_regime_adjustment(layers)
+
+        # 5. Apply catalyst uncertainty
+        catalyst_adj = self._calculate_catalyst_adjustment(layers)
+
+        # 6. Apply extended data adjustments (v2.1)
+        insider_adj = self._calculate_insider_adjustment(stock_data)
+        short_adj = self._calculate_short_interest_adjustment(stock_data)
+        rs_adj = self._calculate_relative_strength_adjustment(stock_data)
+
+        # 7. Combine adjustments
+        final_score = (
+            base_score
+            + agreement_adj
+            + regime_adj
+            - catalyst_adj
+            + insider_adj
+            + short_adj
+            + rs_adj
+        )
+        final_score = max(1, min(100, final_score))  # Clamp to 1-100
+
+        # 8. Determine recommendation
+        recommendation = self._score_to_recommendation(final_score)
+
+        # 9. Calculate confidence
+        confidence = self._calculate_confidence(layers, agreement_level)
+
+        # 10. Build explanation
+        explanation = self._build_explanation(
+            ticker, layers, base_score, agreement_adj, regime_adj, catalyst_adj,
+            insider_adj, short_adj, rs_adj
+        )
+
+        return ConvictionScore(
+            score=round(final_score, 1),
+            recommendation=recommendation,
+            confidence=confidence,
+            layer_results=layers,
+            agreement_level=agreement_level,
+            explanation=explanation,
+            scoring_version='v2'
+        )
+
+    def _create_quality_fail_score(
+        self,
+        ticker: str,
+        layers: LayerResults
+    ) -> ConvictionScore:
+        """Create score for stocks that fail quality gate."""
+        flags = layers.quality_gate.flags
+
+        # Score based on severity
+        critical_count = len([f for f in flags if 'CRITICAL' in f or f in [
+            'negative_cash_flow', 'high_receivables_growth', 'altman_z_distress',
+            'interest_coverage_weak', 'excessive_debt'
+        ]])
+
+        score = max(20, self.QUALITY_FAIL_CAP - (critical_count * 5))
+
+        return ConvictionScore(
+            score=score,
+            recommendation='AVOID',
+            confidence='HIGH',
+            layer_results=layers,
+            agreement_level=0.0,
+            explanation=f"Quality gate failed: {', '.join(flags[:3])}",
+            scoring_version='v2'
+        )
+
+    def _calculate_base_score(self, layers: LayerResults) -> float:
+        """Calculate base score from value and technical layers."""
+        # Start with neutral 50
+        score = 50.0
+
+        # Value contribution (up to +/- 25 points)
+        value_signal = layers.intrinsic_value.valuation_signal
+        margin = layers.intrinsic_value.margin_of_safety
+
+        if value_signal == 'UNDERVALUED':
+            # More undervalued = higher score
+            value_contribution = min(25, margin * 50)  # 50% MoS = +25
+        elif value_signal == 'OVERVALUED':
+            # More overvalued = lower score
+            value_contribution = max(-25, margin * 50)  # Already negative
+        else:
+            value_contribution = 0
+
+        score += value_contribution
+
+        # Technical contribution (up to +/- 25 points)
+        tech_score = layers.technical_confluence.confluence_score
+        # Map 0-100 technical to -25 to +25 contribution
+        tech_contribution = (tech_score - 50) / 2
+
+        score += tech_contribution
+
+        return score
+
+    def _calculate_agreement_adjustment(
+        self,
+        layers: LayerResults
+    ) -> Tuple[float, float]:
+        """
+        Calculate adjustment based on layer agreement.
+
+        Returns:
+            Tuple of (adjustment points, agreement level 0-1)
+        """
+        signals = []
+
+        # Value signal
+        if layers.intrinsic_value.valuation_signal == 'UNDERVALUED':
+            signals.append(1)
+        elif layers.intrinsic_value.valuation_signal == 'OVERVALUED':
+            signals.append(-1)
+        else:
+            signals.append(0)
+
+        # Technical signal
+        if layers.technical_confluence.trend_alignment == 'ALIGNED_UP':
+            signals.append(1)
+        elif layers.technical_confluence.trend_alignment == 'ALIGNED_DOWN':
+            signals.append(-1)
+        else:
+            signals.append(0)
+
+        # Catalyst sentiment
+        if layers.catalyst.catalyst_sentiment == 'POSITIVE':
+            signals.append(1)
+        elif layers.catalyst.catalyst_sentiment == 'NEGATIVE':
+            signals.append(-1)
+        else:
+            signals.append(0)
+
+        # Calculate agreement
+        bullish_count = sum(1 for s in signals if s > 0)
+        bearish_count = sum(1 for s in signals if s < 0)
+        neutral_count = sum(1 for s in signals if s == 0)
+
+        # Strong agreement: all 3 aligned
+        if bullish_count == 3:
+            return (self.STRONG_AGREEMENT_BONUS, 1.0)
+        elif bearish_count == 3:
+            return (-self.STRONG_AGREEMENT_BONUS, 1.0)
+
+        # Moderate agreement: 2 aligned
+        if bullish_count == 2 and bearish_count == 0:
+            return (self.MODERATE_AGREEMENT_BONUS, 0.7)
+        elif bearish_count == 2 and bullish_count == 0:
+            return (-self.MODERATE_AGREEMENT_BONUS, 0.7)
+
+        # Conflict: bullish and bearish signals
+        if bullish_count >= 1 and bearish_count >= 1:
+            if bullish_count == bearish_count:
+                return (0, 0.3)  # Equal conflict
+            else:
+                # Mild conflict - lean toward majority
+                lean = self.CONFLICT_PENALTY if bullish_count > bearish_count else -self.CONFLICT_PENALTY
+                return (lean / 2, 0.4)
+
+        # Mixed with neutral
+        return (0, 0.5)
+
+    def _calculate_regime_adjustment(self, layers: LayerResults) -> float:
+        """Calculate adjustment based on market regime."""
+        regime = layers.market_regime.regime
+
+        # In crisis, be more conservative
+        if regime == 'CRISIS':
+            # Reduce bullish scores, increase bearish
+            if layers.intrinsic_value.valuation_signal == 'UNDERVALUED':
+                return -5  # Even undervalued stocks risky in crisis
+            return 0
+
+        # In risk-on, momentum matters more
+        if regime == 'RISK_ON':
+            if layers.technical_confluence.trend_alignment == 'ALIGNED_UP':
+                return 5  # Boost bullish technicals
+            elif layers.technical_confluence.trend_alignment == 'ALIGNED_DOWN':
+                return -3  # Slight penalty for fighting the trend
+
+        # In recovery, favor value
+        if regime == 'RECOVERY':
+            if layers.intrinsic_value.valuation_signal == 'UNDERVALUED':
+                return 5  # Value plays in recovery
+
+        return 0
+
+    def _calculate_catalyst_adjustment(self, layers: LayerResults) -> float:
+        """Calculate uncertainty penalty for imminent catalysts."""
+        days_to_nearest = layers.catalyst.days_to_nearest
+
+        # Imminent catalyst (within 7 days) = high uncertainty
+        if days_to_nearest <= 7:
+            # Unless sentiment is clear
+            if layers.catalyst.catalyst_sentiment in ['POSITIVE', 'NEGATIVE']:
+                return self.NEAR_CATALYST_UNCERTAINTY
+            return self.IMMINENT_CATALYST_UNCERTAINTY
+
+        # Near catalyst (7-14 days)
+        if days_to_nearest <= 14:
+            return self.NEAR_CATALYST_UNCERTAINTY / 2
+
+        return 0
+
+    def _calculate_insider_adjustment(self, stock_data: Dict[str, Any]) -> float:
+        """Calculate adjustment based on insider trading patterns."""
+        insider_data = stock_data.get('insider_trading')
+        if not insider_data:
+            return 0
+
+        adjustment = 0
+
+        # Cluster buying is the strongest signal
+        if getattr(insider_data, 'cluster_detected', False):
+            adjustment += self.CLUSTER_BUYING_BONUS
+
+        # Executive buying is also significant
+        elif getattr(insider_data, 'executive_buying', False):
+            adjustment += self.EXECUTIVE_BUYING_BONUS
+
+        # Check for heavy selling
+        sentiment = getattr(insider_data, 'net_insider_sentiment', 'NEUTRAL')
+        if sentiment in ['SELL', 'STRONG_SELL']:
+            adjustment -= self.HEAVY_SELLING_PENALTY
+
+        return adjustment
+
+    def _calculate_short_interest_adjustment(self, stock_data: Dict[str, Any]) -> float:
+        """Calculate adjustment based on short interest data."""
+        short_data = stock_data.get('short_interest')
+        if not short_data:
+            return 0
+
+        adjustment = 0
+
+        squeeze_risk = getattr(short_data, 'squeeze_risk', 'UNKNOWN')
+        signal = getattr(short_data, 'signal', 'NEUTRAL')
+
+        # Squeeze potential with bullish price action
+        if squeeze_risk == 'HIGH' and signal == 'BULLISH_SQUEEZE':
+            adjustment += self.SQUEEZE_POTENTIAL_BONUS
+
+        # Crowded short (could be warning or opportunity)
+        elif squeeze_risk == 'HIGH' and signal == 'BEARISH_CROWDED':
+            # High short interest that's increasing = bearish pressure
+            adjustment -= 3
+
+        # Very high short % of float is a volatility flag
+        short_pct = getattr(short_data, 'short_percent_of_float', 0) or 0
+        if short_pct > 20:
+            # Don't add/subtract, but this affects confidence
+            pass
+
+        return adjustment
+
+    def _calculate_relative_strength_adjustment(self, stock_data: Dict[str, Any]) -> float:
+        """Calculate adjustment based on relative strength vs sector."""
+        rs_data = stock_data.get('relative_strength')
+        if not rs_data:
+            return 0
+
+        signal = getattr(rs_data, 'signal', 'INLINE')
+
+        if signal == 'OUTPERFORMING':
+            return self.OUTPERFORMING_BONUS
+        elif signal == 'SLIGHTLY_OUTPERFORMING':
+            return self.OUTPERFORMING_BONUS / 2
+        elif signal == 'UNDERPERFORMING':
+            return -self.UNDERPERFORMING_PENALTY
+        elif signal == 'SLIGHTLY_UNDERPERFORMING':
+            return -self.UNDERPERFORMING_PENALTY / 2
+
+        return 0
+
+    def _score_to_recommendation(self, score: float) -> str:
+        """Convert score to recommendation string."""
+        if score >= self.STRONG_BUY_THRESHOLD:
+            return 'STRONG BUY'
+        elif score >= self.BUY_THRESHOLD:
+            return 'BUY'
+        elif score >= self.HOLD_THRESHOLD:
+            return 'HOLD'
+        elif score >= self.SELL_THRESHOLD:
+            return 'SELL'
+        else:
+            return 'STRONG SELL'
+
+    def _calculate_confidence(
+        self,
+        layers: LayerResults,
+        agreement_level: float
+    ) -> str:
+        """Calculate confidence level in the recommendation."""
+        # Factors affecting confidence:
+        # 1. Layer agreement
+        # 2. Data quality (from each layer's confidence)
+        # 3. Catalyst uncertainty
+
+        confidences = [
+            layers.quality_gate.confidence,
+            layers.intrinsic_value.conviction,
+            layers.market_regime.confidence,
+            layers.technical_confluence.confidence
+        ]
+
+        avg_layer_confidence = sum(confidences) / len(confidences)
+
+        # Combine with agreement
+        overall = (avg_layer_confidence * 0.6) + (agreement_level * 0.4)
+
+        # Catalyst uncertainty reduces confidence
+        if layers.catalyst.days_to_nearest <= 7:
+            overall *= 0.8
+
+        if overall >= 0.75:
+            return 'HIGH'
+        elif overall >= 0.5:
+            return 'MEDIUM'
+        else:
+            return 'LOW'
+
+    def _build_explanation(
+        self,
+        ticker: str,
+        layers: LayerResults,
+        base_score: float,
+        agreement_adj: float,
+        regime_adj: float,
+        catalyst_adj: float,
+        insider_adj: float = 0,
+        short_adj: float = 0,
+        rs_adj: float = 0
+    ) -> str:
+        """Build human-readable explanation of the score."""
+        parts = []
+
+        # Value assessment
+        value = layers.intrinsic_value
+        if value.valuation_signal == 'UNDERVALUED':
+            parts.append(f"Undervalued by {abs(value.margin_of_safety)*100:.0f}%")
+        elif value.valuation_signal == 'OVERVALUED':
+            parts.append(f"Overvalued by {abs(value.margin_of_safety)*100:.0f}%")
+        else:
+            parts.append("Fairly valued")
+
+        # Technical assessment
+        tech = layers.technical_confluence
+        if tech.trend_alignment == 'ALIGNED_UP':
+            parts.append(f"bullish technicals ({len(tech.signals_bullish)} confirming signals)")
+        elif tech.trend_alignment == 'ALIGNED_DOWN':
+            parts.append(f"bearish technicals ({len(tech.signals_bearish)} warning signals)")
+        else:
+            parts.append("mixed technical signals")
+
+        # Regime context
+        regime = layers.market_regime
+        parts.append(f"in {regime.regime.lower().replace('_', ' ')} market")
+
+        # Catalyst note
+        cat = layers.catalyst
+        if cat.days_to_nearest < 30:
+            nearest = cat.nearest_catalyst
+            if nearest:
+                parts.append(f"{nearest.catalyst_type.lower()} in {cat.days_to_nearest}d")
+
+        # Insider trading note
+        if insider_adj >= self.CLUSTER_BUYING_BONUS:
+            parts.append("insider cluster buying")
+        elif insider_adj >= self.EXECUTIVE_BUYING_BONUS:
+            parts.append("executive buying")
+        elif insider_adj < 0:
+            parts.append("insider selling")
+
+        # Relative strength note
+        if rs_adj > 0:
+            parts.append("outperforming sector")
+        elif rs_adj < 0:
+            parts.append("underperforming sector")
+
+        # Short interest note
+        if short_adj > 0:
+            parts.append("squeeze potential")
+        elif short_adj < 0:
+            parts.append("crowded short")
+
+        # Agreement note
+        if agreement_adj > 10:
+            parts.append("strong layer agreement")
+        elif agreement_adj < -5:
+            parts.append("conflicting signals")
+
+        return "; ".join(parts)
+
+
+def calculate_investment_score_v2(
+    ticker: str,
+    stock_data: Dict[str, Any],
+    market_data: Dict[str, Any]
+) -> ConvictionScore:
+    """
+    Main entry point for v2 scoring system.
+
+    This function can be called from app.py as a drop-in replacement
+    for the existing calculate_investment_score() function.
+
+    Args:
+        ticker: Stock symbol
+        stock_data: Dict containing:
+            - 'info': yfinance ticker.info
+            - 'financials': Dict with balance_sheet, cashflow, income_stmt
+            - 'history': DataFrame from ticker.history()
+            - 'news': List from ticker.news
+            - 'calendar': From ticker.calendar
+        market_data: Dict containing:
+            - 'vix': Current VIX value
+            - 'spy': Dict with price, sma_20, sma_50, sma_200, change_1m
+            - 'qqq': Dict with price, change_1m
+            - 'iwm': Dict with price, change_1m
+
+    Returns:
+        ConvictionScore with score, recommendation, confidence, and layer details
+    """
+    combiner = ScoreCombiner()
+    return combiner.calculate_conviction_score(ticker, stock_data, market_data)
