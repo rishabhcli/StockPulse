@@ -3,7 +3,7 @@ import { View, Text, ScrollView, StyleSheet, RefreshControl, Platform, Alert } f
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { colors, spacing, fontSize, borderRadius } from '../../constants/theme';
+import { colors, spacing, fontSize, fontFamily, borderRadius } from '../../constants/theme';
 import Surface from '../../components/ui/Surface';
 import Button from '../../components/ui/Button';
 import { useTradingStore } from '../../stores/useTradingStore';
@@ -312,7 +312,8 @@ const styles = StyleSheet.create({
   title: {
     color: colors.text,
     fontSize: fontSize['2xl'],
-    fontWeight: 'bold',
+    fontFamily: fontFamily.serif,
+    fontWeight: '400',
   },
   subtitle: {
     color: colors.textSecondary,
@@ -332,7 +333,7 @@ const styles = StyleSheet.create({
   portfolioValue: {
     color: colors.text,
     fontSize: fontSize['4xl'],
-    fontWeight: 'bold',
+    fontFamily: fontFamily.serifItalic,
     marginVertical: spacing.sm,
   },
   pnlRow: {
@@ -403,7 +404,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     color: colors.text,
     fontSize: fontSize.lg,
-    fontWeight: 'bold',
+    fontFamily: fontFamily.sansBold,
     marginBottom: spacing.md,
   },
   // Empty states

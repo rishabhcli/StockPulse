@@ -1,27 +1,79 @@
 import { useEffect } from 'react';
-import { Stack, Redirect } from 'expo-router';
+import { Stack, Redirect, SplashScreen } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { Platform, StyleSheet } from 'react-native';
+import { Platform, StyleSheet, Text, TextInput } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { PaperProvider, MD3DarkTheme } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { colors } from '../constants/theme';
+import { useFonts } from 'expo-font';
+import {
+  DMSans_400Regular,
+  DMSans_500Medium,
+  DMSans_600SemiBold,
+  DMSans_700Bold,
+  DMSans_400Regular_Italic,
+} from '@expo-google-fonts/dm-sans';
+import {
+  InstrumentSerif_400Regular,
+  InstrumentSerif_400Regular_Italic,
+} from '@expo-google-fonts/instrument-serif';
+import { colors, fontFamily } from '../constants/theme';
 import { useAuthStore } from '../stores/useAuthStore';
 import { useTradingStore } from '../stores/useTradingStore';
 import { useWatchlistStore } from '../stores/useWatchlistStore';
 import { Loading } from '../components/ui/Loading';
 import SheetProvider from '../components/sheets/SheetProvider';
 
+// Keep splash screen visible while fonts load
+SplashScreen.preventAutoHideAsync();
+
+// ---------------------------------------------------------------------------
+// Global default font — DM Sans (matching the web app's --sans)
+// Patches Text.render so every <Text> inherits fontFamily unless overridden.
+// ---------------------------------------------------------------------------
+const _origTextRender = (Text as any).render;
+if (_origTextRender) {
+  (Text as any).render = function (props: any, ref: any) {
+    return _origTextRender.call(this, {
+      ...props,
+      style: [{ fontFamily: 'DMSans_400Regular' }, props.style],
+    }, ref);
+  };
+}
+const _origInputRender = (TextInput as any).render;
+if (_origInputRender) {
+  (TextInput as any).render = function (props: any, ref: any) {
+    return _origInputRender.call(this, {
+      ...props,
+      style: [{ fontFamily: 'DMSans_400Regular' }, props.style],
+    }, ref);
+  };
+}
+
 // ============================================================================
 // MATERIAL DESIGN 3 THEME CONFIGURATION
 // ============================================================================
 
 // Custom M3 dark theme with StockPulse brand colors
+// Uses DM Sans as the default font across all Paper components
 const paperTheme = {
   ...MD3DarkTheme,
 
   // Enable Material Design 3
   version: 3 as const,
+
+  // Apply DM Sans to all Paper typography variants
+  fonts: {
+    ...MD3DarkTheme.fonts,
+    ...Object.fromEntries(
+      Object.entries(MD3DarkTheme.fonts).map(([key, value]) => [
+        key,
+        typeof value === 'object' && value !== null
+          ? { ...value, fontFamily: fontFamily.sans }
+          : value,
+      ])
+    ),
+  },
 
   // Custom color scheme based on #22c55e (green) seed color
   colors: {
@@ -110,6 +162,17 @@ export default function RootLayout() {
   const initializeTrading = useTradingStore((state) => state.initialize);
   const fetchWatchlists = useWatchlistStore((state) => state.fetchWatchlists);
 
+  // Load DM Sans + Instrument Serif (matching the original web app)
+  const [fontsLoaded] = useFonts({
+    DMSans_400Regular,
+    DMSans_500Medium,
+    DMSans_600SemiBold,
+    DMSans_700Bold,
+    DMSans_400Regular_Italic,
+    InstrumentSerif_400Regular,
+    InstrumentSerif_400Regular_Italic,
+  });
+
   useEffect(() => {
     initializeAuth();
   }, []);
@@ -121,8 +184,14 @@ export default function RootLayout() {
     }
   }, [isAuthenticated]);
 
-  // Show loading screen while checking auth state
-  if (isLoading) {
+  useEffect(() => {
+    if (fontsLoaded && !isLoading) {
+      SplashScreen.hideAsync();
+    }
+  }, [fontsLoaded, isLoading]);
+
+  // Show loading screen while checking auth state or loading fonts
+  if (isLoading || !fontsLoaded) {
     return (
       <SafeAreaProvider>
         <PaperProvider theme={paperTheme}>

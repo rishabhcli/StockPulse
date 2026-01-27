@@ -11,7 +11,7 @@ import Animated, {
   useAnimatedStyle,
   interpolate,
 } from 'react-native-reanimated';
-import { colors, fontSize, getScoreColor, getScoreLabel, animation } from '../../constants/theme';
+import { colors, fontSize, fontFamily, getScoreColor, getScoreLabel, animation } from '../../constants/theme';
 
 // ============================================================================
 // ANIMATED COMPONENTS
@@ -256,7 +256,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   scoreText: {
-    fontWeight: 'bold',
+    fontFamily: fontFamily.serifItalic,
     letterSpacing: -1,
   },
   labelBadge: {
@@ -267,7 +267,7 @@ const styles = StyleSheet.create({
   },
   labelText: {
     fontSize: fontSize.xs,
-    fontWeight: '700',
+    fontFamily: fontFamily.sansBold,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
@@ -280,7 +280,7 @@ const styles = StyleSheet.create({
   },
   miniScore: {
     position: 'absolute',
-    fontWeight: 'bold',
+    fontFamily: fontFamily.sansBold,
   },
 });
 

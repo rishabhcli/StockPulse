@@ -14,7 +14,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useMarketStore } from '../../stores/useMarketStore';
 import { PennyStock } from '../../lib/types';
-import { colors, spacing, fontSize, borderRadius, animation } from '../../constants/theme';
+import { colors, spacing, fontSize, fontFamily, borderRadius, animation } from '../../constants/theme';
 import { isLiquidGlassAvailable } from '../../components/ui/Surface';
 import SentimentHeader from '../../components/market/SentimentHeader';
 import MarketStrip from '../../components/market/MarketStrip';
@@ -457,12 +457,14 @@ const styles = StyleSheet.create({
   title: {
     color: colors.text,
     fontSize: fontSize['3xl'],
-    fontWeight: '800',
+    fontFamily: fontFamily.serif,
+    fontWeight: '400',
     letterSpacing: -0.5,
   },
   subtitle: {
     color: colors.textMuted,
     fontSize: fontSize.sm,
+    fontFamily: fontFamily.sans,
     marginTop: 2,
   },
 
@@ -486,7 +488,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     color: colors.text,
     fontSize: fontSize.lg,
-    fontWeight: '700',
+    fontFamily: fontFamily.sansBold,
   },
   sectionSubtitle: {
     color: colors.textMuted,

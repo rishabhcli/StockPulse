@@ -3,7 +3,7 @@ import { View, StyleSheet, KeyboardAvoidingView, Platform, ScrollView } from 're
 import { Text, TextInput, Button, HelperText } from 'react-native-paper';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../stores/useAuthStore';
-import { colors } from '../../constants/theme';
+import { colors, fontFamily } from '../../constants/theme';
 
 export default function SignUpScreen() {
   const [fullName, setFullName] = useState('');
@@ -153,7 +153,7 @@ const styles = StyleSheet.create({
   },
   title: {
     color: colors.primary,
-    fontWeight: 'bold',
+    fontFamily: fontFamily.serif,
     marginBottom: 8,
   },
   subtitle: {

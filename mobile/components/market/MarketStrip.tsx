@@ -10,7 +10,7 @@ import Animated, {
   withTiming,
   interpolate,
 } from 'react-native-reanimated';
-import { colors, borderRadius, spacing, fontSize, animation } from '../../constants/theme';
+import { colors, borderRadius, spacing, fontSize, fontFamily, animation } from '../../constants/theme';
 import { IndexData } from '../../lib/types';
 import { formatPrice, formatPercent } from '../../lib/utils';
 import { GlassContainer, isLiquidGlassAvailable } from '../ui/Surface';
@@ -260,14 +260,14 @@ const styles = StyleSheet.create({
   symbol: {
     color: colors.text,
     fontSize: fontSize.sm,
-    fontWeight: 'bold',
+    fontFamily: fontFamily.sansBold,
     letterSpacing: 0.5,
     marginBottom: spacing.xs,
   },
   price: {
     color: colors.text,
     fontSize: fontSize.lg,
-    fontWeight: '600',
+    fontFamily: fontFamily.serifItalic,
     marginBottom: spacing.xs,
   },
   changeContainer: {
@@ -285,7 +285,7 @@ const styles = StyleSheet.create({
   },
   change: {
     fontSize: fontSize.xs,
-    fontWeight: '600',
+    fontFamily: fontFamily.sansSemibold,
     marginLeft: 2,
   },
   positiveText: {

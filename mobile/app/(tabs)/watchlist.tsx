@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useSheetContext } from '../../components/sheets/SheetProvider';
 import * as Haptics from 'expo-haptics';
-import { colors, spacing, fontSize, borderRadius } from '../../constants/theme';
+import { colors, spacing, fontSize, fontFamily, borderRadius } from '../../constants/theme';
 import Surface from '../../components/ui/Surface';
 import Button from '../../components/ui/Button';
 import { useWatchlistStore } from '../../stores/useWatchlistStore';
@@ -310,7 +310,8 @@ const styles = StyleSheet.create({
   title: {
     color: colors.text,
     fontSize: fontSize['2xl'],
-    fontWeight: 'bold',
+    fontFamily: fontFamily.serif,
+    fontWeight: '400',
   },
   subtitle: {
     color: colors.textSecondary,

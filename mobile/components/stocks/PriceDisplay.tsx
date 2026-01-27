@@ -9,7 +9,7 @@ import Animated, {
   withTiming,
   interpolate,
 } from 'react-native-reanimated';
-import { colors, spacing, fontSize, borderRadius, animation } from '../../constants/theme';
+import { colors, spacing, fontSize, fontFamily, borderRadius, animation } from '../../constants/theme';
 import { formatPrice, formatPercent } from '../../lib/utils';
 
 // ============================================================================
@@ -156,7 +156,7 @@ const styles = StyleSheet.create({
   },
   price: {
     color: colors.text,
-    fontWeight: 'bold',
+    fontFamily: fontFamily.serifItalic,
     letterSpacing: -0.5,
   },
   changeContainer: {
@@ -187,7 +187,7 @@ const styles = StyleSheet.create({
     borderColor: colors.web.glassBorder,
   } as any,
   changeText: {
-    fontWeight: '600',
+    fontFamily: fontFamily.sansSemibold,
     marginLeft: 2,
   },
   divider: {
@@ -197,7 +197,7 @@ const styles = StyleSheet.create({
     marginHorizontal: spacing.sm,
   },
   changePercent: {
-    fontWeight: '700',
+    fontFamily: fontFamily.sansBold,
   },
 });
 

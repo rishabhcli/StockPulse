@@ -10,7 +10,7 @@ import Animated, {
   withTiming,
   interpolate,
 } from 'react-native-reanimated';
-import { colors, borderRadius, spacing, fontSize, animation } from '../../constants/theme';
+import { colors, borderRadius, spacing, fontSize, fontFamily, animation } from '../../constants/theme';
 import { NewsArticle } from '../../lib/types';
 import { formatDate } from '../../lib/utils';
 
@@ -215,7 +215,7 @@ const styles = StyleSheet.create({
   title: {
     color: colors.text,
     fontSize: fontSize.md,
-    fontWeight: '600',
+    fontFamily: fontFamily.sansSemibold,
     lineHeight: 22,
   },
   meta: {
@@ -231,7 +231,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: fontSize.xs,
     marginLeft: spacing.xs,
-    fontWeight: '500',
+    fontFamily: fontFamily.sansMedium,
   },
   dot: {
     color: colors.textMuted,
@@ -284,7 +284,7 @@ const styles = StyleSheet.create({
   emptyTitle: {
     color: colors.text,
     fontSize: fontSize.lg,
-    fontWeight: '600',
+    fontFamily: fontFamily.sansSemibold,
     marginBottom: spacing.xs,
   },
   emptyText: {

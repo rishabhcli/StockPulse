@@ -8,7 +8,7 @@ import Animated, {
   withDelay,
   withTiming,
 } from 'react-native-reanimated';
-import { colors, borderRadius, spacing, fontSize, animation } from '../../constants/theme';
+import { colors, borderRadius, spacing, fontSize, fontFamily, animation } from '../../constants/theme';
 import { MarketSentiment } from '../../lib/types';
 import Surface, { GlassContainer, isLiquidGlassAvailable } from '../ui/Surface';
 import TappableTerm from '../sheets/TappableTerm';
@@ -255,12 +255,12 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginBottom: spacing.xs,
-    fontWeight: '500',
+    fontFamily: fontFamily.sansMedium,
   },
   value: {
     color: colors.text,
     fontSize: fontSize.xl,
-    fontWeight: 'bold',
+    fontFamily: fontFamily.serifItalic,
   },
   iconContainer: {
     height: 28,
@@ -271,7 +271,7 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: fontSize.xs,
     marginTop: spacing.xs,
-    fontWeight: '500',
+    fontFamily: fontFamily.sansMedium,
   },
   divider: {
     width: StyleSheet.hairlineWidth,

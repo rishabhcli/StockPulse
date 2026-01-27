@@ -12,7 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useRouter } from 'expo-router';
-import { colors, spacing, fontSize, borderRadius } from '../../constants/theme';
+import { colors, spacing, fontSize, fontFamily, borderRadius } from '../../constants/theme';
 import Surface from '../../components/ui/Surface';
 import Button from '../../components/ui/Button';
 import { useAuthStore } from '../../stores/useAuthStore';
@@ -221,7 +221,8 @@ const styles = StyleSheet.create({
   title: {
     color: colors.text,
     fontSize: fontSize['2xl'],
-    fontWeight: 'bold',
+    fontFamily: fontFamily.serif,
+    fontWeight: '400',
   },
   // User card
   userCard: {
@@ -288,7 +289,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     color: colors.textMuted,
     fontSize: fontSize.xs,
-    fontWeight: '600',
+    fontFamily: fontFamily.sansSemibold,
     textTransform: 'uppercase',
     letterSpacing: 1,
     marginBottom: spacing.sm,

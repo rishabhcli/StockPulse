@@ -8,7 +8,7 @@ import Animated, {
   withSpring,
   interpolate,
 } from 'react-native-reanimated';
-import { colors, borderRadius, spacing, fontSize, getScoreColor, animation } from '../../constants/theme';
+import { colors, borderRadius, spacing, fontSize, fontFamily, getScoreColor, animation } from '../../constants/theme';
 import { ScreenerResult } from '../../lib/types';
 import { formatPrice, formatPercent } from '../../lib/utils';
 import Badge from '../ui/Badge';
@@ -290,7 +290,7 @@ const styles = StyleSheet.create({
   ticker: {
     color: colors.text,
     fontSize: fontSize.lg,
-    fontWeight: 'bold',
+    fontFamily: fontFamily.sansBold,
     letterSpacing: 0.5,
   },
   companyName: {
@@ -308,7 +308,7 @@ const styles = StyleSheet.create({
   price: {
     color: colors.text,
     fontSize: fontSize.md,
-    fontWeight: '600',
+    fontFamily: fontFamily.sansSemibold,
   },
   changeChip: {
     flexDirection: 'row',
@@ -422,7 +422,7 @@ const styles = StyleSheet.create({
   priceLarge: {
     color: colors.text,
     fontSize: fontSize['3xl'],
-    fontWeight: 'bold',
+    fontFamily: fontFamily.serifItalic,
   },
   changeContainerLarge: {
     flexDirection: 'row',

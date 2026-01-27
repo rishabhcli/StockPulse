@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useAnalysisStore } from '../../stores/useAnalysisStore';
-import { colors, spacing, fontSize, borderRadius, getScoreColor, getScoreLabel } from '../../constants/theme';
+import { colors, spacing, fontSize, fontFamily, borderRadius, getScoreColor, getScoreLabel } from '../../constants/theme';
 import { formatPrice, formatPercent } from '../../lib/utils';
 import Input from '../../components/ui/Input';
 import Button from '../../components/ui/Button';
@@ -273,7 +273,8 @@ const styles = StyleSheet.create({
   title: {
     color: colors.text,
     fontSize: fontSize['2xl'],
-    fontWeight: 'bold',
+    fontFamily: fontFamily.serif,
+    fontWeight: '400',
   },
   subtitle: {
     color: colors.textSecondary,
@@ -348,7 +349,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     color: colors.text,
     fontSize: fontSize.lg,
-    fontWeight: 'bold',
+    fontFamily: fontFamily.sansBold,
     marginBottom: spacing.md,
   },
   scoreBreakdown: {

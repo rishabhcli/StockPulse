@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, fontSize } from '../../constants/theme';
+import { colors, spacing, fontSize, fontFamily } from '../../constants/theme';
 
 export default function ChatScreen() {
   return (
@@ -35,7 +35,8 @@ const styles = StyleSheet.create({
   title: {
     color: colors.text,
     fontSize: fontSize['2xl'],
-    fontWeight: 'bold',
+    fontFamily: fontFamily.serif,
+    fontWeight: '400',
   },
   subtitle: {
     color: colors.textSecondary,

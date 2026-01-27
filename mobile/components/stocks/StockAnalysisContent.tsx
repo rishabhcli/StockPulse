@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { StockAnalysis } from '../../lib/types';
-import { colors, spacing, fontSize, getScoreColor } from '../../constants/theme';
+import { colors, spacing, fontSize, fontFamily, getScoreColor } from '../../constants/theme';
 import Surface from '../ui/Surface';
 import ScoreCircle from '../charts/ScoreCircle';
 import PriceDisplay from './PriceDisplay';
@@ -209,7 +209,7 @@ const styles = StyleSheet.create({
   ticker: {
     color: colors.text,
     fontSize: fontSize['3xl'],
-    fontWeight: 'bold',
+    fontFamily: fontFamily.sansBold,
   },
   companyName: {
     color: colors.textSecondary,
@@ -226,7 +226,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     color: colors.text,
     fontSize: fontSize.lg,
-    fontWeight: 'bold',
+    fontFamily: fontFamily.sansBold,
     marginBottom: spacing.md,
   },
   reasonsCard: {
@@ -258,7 +258,7 @@ const styles = StyleSheet.create({
   },
   scoreValue: {
     fontSize: fontSize['3xl'],
-    fontWeight: 'bold',
+    fontFamily: fontFamily.serifItalic,
   },
   scoreWeight: {
     color: colors.textMuted,
@@ -283,6 +283,6 @@ const styles = StyleSheet.create({
   metricValue: {
     color: colors.text,
     fontSize: fontSize.md,
-    fontWeight: '600',
+    fontFamily: fontFamily.sansSemibold,
   },
 });
