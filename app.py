@@ -14,6 +14,16 @@ import time
 import threading
 import logging
 
+# Load environment variables
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+# Supabase database service
+from lib.db_service import db_service
+
 # ============== FEATURE FLAGS ==============
 # v2 layered scoring is now the default
 USE_LAYERED_SCORING = os.environ.get('USE_LAYERED_SCORING', 'true').lower() == 'true'
@@ -331,7 +341,10 @@ def normalize_ticker(ticker):
 
 # ============== END INDEX SYMBOL NORMALIZATION ==============
 
-CORS(app)
+_ALLOWED_ORIGINS = os.environ.get(
+    'CORS_ORIGINS', 'http://localhost:8080,http://localhost:8081,http://localhost:19006'
+).split(',')
+CORS(app, origins=_ALLOWED_ORIGINS, supports_credentials=True)
 
 # ElevenLabs Configuration
 ELEVENLABS_API_KEY = os.environ.get('ELEVENLABS_API_KEY', '')
@@ -390,11 +403,13 @@ class TradingSimulator:
     """
     Paper trading simulator with $100,000 virtual capital.
     Uses investment scores to make AI-driven trading decisions.
+    Persists state to Supabase when configured.
     """
 
     INITIAL_CAPITAL = 100000.0
 
-    def __init__(self):
+    def __init__(self, portfolio_id=None):
+        self.portfolio_id = portfolio_id
         self.reset()
 
     def reset(self):
@@ -583,6 +598,25 @@ class TradingSimulator:
                 trade['cash_after'] = round(self.cash, 2)
 
         self.trade_log.append(trade)
+
+        # Persist to Supabase
+        if self.portfolio_id and trade.get('status') == 'executed':
+            try:
+                db_service.save_trade(self.portfolio_id, trade)
+                db_service.update_portfolio_cash(self.portfolio_id, self.cash)
+                # Update or delete position in DB
+                if ticker in self.positions:
+                    pos = self.positions[ticker]
+                    db_service.upsert_position(
+                        self.portfolio_id, ticker, pos['side'],
+                        pos['quantity'], pos['avg_price'],
+                        pos.get('human_controlled', False)
+                    )
+                else:
+                    db_service.delete_position(self.portfolio_id, ticker, side)
+            except Exception as db_err:
+                logger.debug(f"DB trade persist failed: {db_err}")
+
         return trade
 
     def record_portfolio_snapshot(self):
@@ -605,6 +639,19 @@ class TradingSimulator:
             'cash': round(self.cash, 2),
             'positions_value': round(positions_value, 2)
         })
+
+        # Persist snapshot to Supabase
+        if self.portfolio_id:
+            try:
+                db_service.save_portfolio_snapshot(
+                    self.portfolio_id,
+                    round(total_value, 2),
+                    round(self.cash, 2),
+                    round(positions_value, 2),
+                    round(spy_price, 2) if spy_price else None
+                )
+            except Exception as db_err:
+                logger.debug(f"DB snapshot persist failed: {db_err}")
 
     def get_status(self):
         """Get complete simulation status"""
@@ -2925,6 +2972,12 @@ def calculate_investment_score(ticker_symbol):
         # Generate summary for voice
         result['voice_summary'] = generate_summary(result)
 
+        # Persist analysis to Supabase
+        try:
+            db_service.save_stock_analysis(result)
+        except Exception as db_err:
+            logger.debug(f"DB save failed for {ticker_symbol}: {db_err}")
+
         return result
 
     except Exception as e:
@@ -3130,6 +3183,12 @@ def calculate_investment_score_v2(ticker_symbol):
                     record_score(ticker_symbol, merged['score'], price)
             except Exception as e:
                 logger.debug(f"Score recording failed for {ticker_symbol}: {e}")
+
+            # Persist analysis to Supabase
+            try:
+                db_service.save_stock_analysis(merged)
+            except Exception as db_err:
+                logger.debug(f"DB save failed for {ticker_symbol}: {db_err}")
 
             return merged
 
@@ -3338,7 +3397,7 @@ def reddit_sentiment():
         return jsonify({"error": "Reddit sentiment module not available"}), 500
     except Exception as e:
         logger.error(f"Reddit sentiment error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "An internal error occurred"}), 500
 
 
 @app.route('/api/insider-trading', methods=['GET'])
@@ -3358,7 +3417,7 @@ def get_insider_trading_api():
         return jsonify({"error": "Insider trading module not available"}), 500
     except Exception as e:
         logger.error(f"Insider trading error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "An internal error occurred"}), 500
 
 
 @app.route('/api/short-interest', methods=['GET'])
@@ -3377,7 +3436,7 @@ def get_short_interest_api():
         return jsonify({"error": "Short interest module not available"}), 500
     except Exception as e:
         logger.error(f"Short interest error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "An internal error occurred"}), 500
 
 
 @app.route('/api/relative-strength', methods=['GET'])
@@ -3404,7 +3463,7 @@ def get_relative_strength_api():
         return jsonify({"error": "Relative strength module not available"}), 500
     except Exception as e:
         logger.error(f"Relative strength error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "An internal error occurred"}), 500
 
 
 @app.route('/api/economic-context', methods=['GET'])
@@ -3418,7 +3477,7 @@ def get_economic_context_api():
         return jsonify({"error": "Economic calendar module not available"}), 500
     except Exception as e:
         logger.error(f"Economic context error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "An internal error occurred"}), 500
 
 
 @app.route('/api/backtest', methods=['GET'])
@@ -3437,7 +3496,7 @@ def get_backtest_api():
         return jsonify({"error": "Backtester module not available"}), 500
     except Exception as e:
         logger.error(f"Backtest error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "An internal error occurred"}), 500
 
 
 @app.route('/api/backtest/record', methods=['POST'])
@@ -3459,7 +3518,7 @@ def record_score_api():
         return jsonify({"error": "Backtester module not available"}), 500
     except Exception as e:
         logger.error(f"Record score error: {e}")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "An internal error occurred"}), 500
 
 
 @app.route('/api/speak', methods=['POST'])
@@ -3502,7 +3561,7 @@ def speak():
             return jsonify({"error": "Failed to generate speech"}), 500
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "An internal error occurred"}), 500
 
 def get_quick_stock_data(symbols):
     """Get quick stock data with fallback support"""
@@ -3954,7 +4013,7 @@ def stock_chart(ticker):
             }
         })
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'An internal error occurred'}), 500
 
 @app.route('/stock/<ticker>')
 def stock_page(ticker):
@@ -3970,9 +4029,55 @@ def clear_cache_endpoint():
     return jsonify({"status": "success", "message": "Cache cleared"})
 
 
+# ============== JWT AUTH HELPER ==============
+
+# Supabase JWT secret for signature verification
+_SUPABASE_JWT_SECRET = os.environ.get('SUPABASE_JWT_SECRET', '')
+
+
+def get_user_id_from_request():
+    """Extract and verify user ID from Supabase JWT in Authorization header."""
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return None
+    token = auth_header[7:]
+    try:
+        import jwt as pyjwt
+        if _SUPABASE_JWT_SECRET:
+            payload = pyjwt.decode(
+                token,
+                _SUPABASE_JWT_SECRET,
+                algorithms=["HS256"],
+                audience="authenticated",
+            )
+        else:
+            # Fallback: decode without verification if secret not configured
+            # Log a warning so operators know to set SUPABASE_JWT_SECRET
+            logger.warning("SUPABASE_JWT_SECRET not set — JWT signature not verified")
+            payload = pyjwt.decode(token, options={"verify_signature": False})
+        return payload.get('sub')
+    except Exception:
+        return None
+
+
+def require_auth(f):
+    """Decorator to require a valid JWT on an endpoint."""
+    from functools import wraps
+
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        user_id = get_user_id_from_request()
+        if not user_id:
+            return jsonify({'error': 'Authentication required'}), 401
+        request.user_id = user_id
+        return f(*args, **kwargs)
+    return decorated
+
+
 # ============== TRADING SIMULATOR API ENDPOINTS ==============
 
 @app.route('/api/trading-sim/status', methods=['GET'])
+@require_auth
 def trading_sim_status():
     """Get current trading simulation status including portfolio value, positions, and returns"""
     market_open, market_status = is_market_open()
@@ -3983,6 +4088,7 @@ def trading_sim_status():
 
 
 @app.route('/api/trading-sim/history', methods=['GET'])
+@require_auth
 def trading_sim_history():
     """Get portfolio value history for charting"""
     history = trading_sim.portfolio_history
@@ -4015,9 +4121,10 @@ def trading_sim_history():
 
 
 @app.route('/api/trading-sim/trades', methods=['GET'])
+@require_auth
 def trading_sim_trades():
     """Get trade log with AI reasoning"""
-    limit = request.args.get('limit', 50, type=int)
+    limit = min(request.args.get('limit', 50, type=int), 200)
     trades = trading_sim.trade_log[-limit:]  # Get most recent trades
     trades.reverse()  # Most recent first
     return jsonify({
@@ -4028,6 +4135,7 @@ def trading_sim_trades():
 
 
 @app.route('/api/trading-sim/execute', methods=['POST'])
+@require_auth
 def trading_sim_execute():
     """Execute AI trading decision cycle - analyzes market and makes trades"""
     market_open, market_status = is_market_open()
@@ -4048,6 +4156,7 @@ def trading_sim_execute():
 
 
 @app.route('/api/trading-sim/reset', methods=['POST'])
+@require_auth
 def trading_sim_reset():
     """Reset simulation to $100,000 starting capital"""
     trading_sim.reset()
@@ -4059,16 +4168,26 @@ def trading_sim_reset():
 
 
 @app.route('/api/trading-sim/manual-trade', methods=['POST'])
+@require_auth
 def trading_sim_manual_trade():
     """Execute a manual (human-initiated) trade that overrides AI control"""
     data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Request body required'}), 400
 
     trade_type = data.get('type')  # buy, sell, short, cover
     ticker = data.get('ticker', '').upper()
-    quantity = data.get('quantity', 0)
 
-    if not trade_type or not ticker or quantity <= 0:
-        return jsonify({'error': 'Missing required fields: type, ticker, quantity'}), 400
+    if trade_type not in ('buy', 'sell', 'short', 'cover'):
+        return jsonify({'error': 'Invalid trade type. Must be: buy, sell, short, cover'}), 400
+
+    try:
+        quantity = int(data.get('quantity', 0))
+    except (ValueError, TypeError):
+        return jsonify({'error': 'Quantity must be a positive integer'}), 400
+
+    if not ticker or quantity <= 0 or quantity > 100000:
+        return jsonify({'error': 'Missing or invalid fields: ticker required, quantity must be 1-100000'}), 400
 
     # Get current price
     price = trading_sim.get_current_price(ticker)
@@ -4097,6 +4216,7 @@ def trading_sim_manual_trade():
 
 
 @app.route('/api/trading-sim/close-position', methods=['POST'])
+@require_auth
 def trading_sim_close_position():
     """Close an existing position (human override)"""
     data = request.get_json()
@@ -4139,13 +4259,51 @@ def trading_sim_close_position():
 # ============== END TRADING SIMULATOR API ENDPOINTS ==============
 
 
+# ============== SUPABASE-BACKED API ENDPOINTS ==============
+
+@app.route('/api/analysis/history/<ticker>', methods=['GET'])
+def get_analysis_history(ticker):
+    """Get historical analyses for a ticker from Supabase."""
+    limit = min(request.args.get('limit', 30, type=int), 200)
+    history = db_service.get_analysis_history(ticker.upper(), limit)
+    return jsonify({'ticker': ticker.upper(), 'history': history, 'count': len(history)})
+
+
+@app.route('/api/analysis/latest/<ticker>', methods=['GET'])
+def get_latest_analysis(ticker):
+    """Get most recent analysis for a ticker from Supabase."""
+    analysis = db_service.get_latest_analysis(ticker.upper())
+    if analysis:
+        return jsonify(analysis)
+    return jsonify({'error': f'No analysis found for {ticker.upper()}'}), 404
+
+
+@app.after_request
+def set_security_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    if os.environ.get('ENABLE_HSTS', '').lower() == 'true':
+        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    return response
+
+
 @app.route('/health')
 def health():
-    return jsonify({"status": "healthy", "timestamp": datetime.now().isoformat()})
+    return jsonify({
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "supabase_enabled": db_service.enabled,
+    })
 
 @app.errorhandler(404)
 def not_found(e):
     return send_from_directory(app.static_folder, 'index.html')
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=8080)
+    app.run(
+        debug=os.environ.get('FLASK_DEBUG', 'false').lower() == 'true',
+        host='0.0.0.0',
+        port=int(os.environ.get('PORT', 8080)),
+    )
