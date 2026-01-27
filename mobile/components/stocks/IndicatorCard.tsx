@@ -11,6 +11,8 @@ import Animated, {
 } from 'react-native-reanimated';
 import { colors, borderRadius, spacing, fontSize, animation } from '../../constants/theme';
 import { useEffect } from 'react';
+import TappableTerm from '../sheets/TappableTerm';
+import { getGlossaryKey } from '../../lib/glossary';
 
 // ============================================================================
 // TYPES
@@ -100,9 +102,13 @@ export function IndicatorCard({ name, value, signal, description, icon, index = 
 
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.name} numberOfLines={1}>
-          {name}
-        </Text>
+        {getGlossaryKey(name) ? (
+          <TappableTerm displayName={name} style={styles.name} />
+        ) : (
+          <Text style={styles.name} numberOfLines={1}>
+            {name}
+          </Text>
+        )}
         <View style={[styles.signalBadge, { backgroundColor: `${signalColor}20` }]}>
           <Ionicons name={getSignalIcon()} size={12} color={signalColor} />
         </View>

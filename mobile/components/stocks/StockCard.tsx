@@ -1,6 +1,5 @@
 import React from 'react';
 import { View, Text, StyleSheet, Pressable, Platform } from 'react-native';
-import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import Animated, {
@@ -13,6 +12,7 @@ import { colors, borderRadius, spacing, fontSize, getScoreColor, animation } fro
 import { ScreenerResult } from '../../lib/types';
 import { formatPrice, formatPercent } from '../../lib/utils';
 import Badge from '../ui/Badge';
+import { useSheetContext } from '../sheets/SheetProvider';
 
 // ============================================================================
 // TYPES
@@ -35,7 +35,7 @@ const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 // ============================================================================
 
 export function StockCard({ stock, variant = 'compact', onPress }: StockCardProps) {
-  const router = useRouter();
+  const { openStockSheet } = useSheetContext();
   const scoreColor = getScoreColor(stock.investment_score);
   const isPositive = stock.price_change_pct >= 0;
   const pressed = useSharedValue(0);
@@ -55,7 +55,7 @@ export function StockCard({ stock, variant = 'compact', onPress }: StockCardProp
     if (onPress) {
       onPress();
     } else {
-      router.push(`/stock/${stock.ticker}`);
+      openStockSheet(stock.ticker);
     }
   };
 

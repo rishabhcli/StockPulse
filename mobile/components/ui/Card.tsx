@@ -134,6 +134,17 @@ export function Card({
   // FALLBACK — Platform-specific non-Glass rendering
   // ============================================================================
 
+  // Web-only CSS extras (backdrop-filter, transition, boxShadow)
+  const webGlassExtras: ViewStyle = {
+    backdropFilter: 'blur(20px)',
+    WebkitBackdropFilter: 'blur(20px)',
+    transition: 'all 0.2s ease',
+  } as any;
+  const webGlassElevatedExtras: ViewStyle = {
+    ...webGlassExtras,
+    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+  } as any;
+
   const getVariantStyle = (): ViewStyle[] => {
     const baseStyles: ViewStyle[] = [styles.base];
 
@@ -172,6 +183,7 @@ export function Card({
       switch (variant) {
         case 'elevated':
           baseStyles.push(styles.webElevated);
+          baseStyles.push(webGlassElevatedExtras);
           break;
         case 'outlined':
           baseStyles.push(styles.webOutlined);
@@ -181,6 +193,7 @@ export function Card({
           break;
         default:
           baseStyles.push(styles.webDefault);
+          baseStyles.push(webGlassExtras);
       }
     }
 
@@ -298,26 +311,16 @@ const styles = StyleSheet.create({
   // ============================================================================
   // WEB STYLES (Glassmorphism)
   // ============================================================================
-  webBase: {
-    // @ts-ignore
-    transition: 'all 0.2s ease',
-  },
+  webBase: {},
   webDefault: {
     backgroundColor: colors.web.glassBackground,
     borderWidth: 1,
     borderColor: colors.web.glassBorder,
-    // @ts-ignore
-    backdropFilter: 'blur(20px)',
-    WebkitBackdropFilter: 'blur(20px)',
   },
   webElevated: {
     backgroundColor: colors.web.glassBackground,
     borderWidth: 1,
     borderColor: colors.web.glassBorder,
-    // @ts-ignore
-    backdropFilter: 'blur(20px)',
-    WebkitBackdropFilter: 'blur(20px)',
-    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
   },
   webOutlined: {
     backgroundColor: 'transparent',

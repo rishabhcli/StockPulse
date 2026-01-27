@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useAnalysisStore } from '../../stores/useAnalysisStore';
 import { colors, spacing, fontSize, borderRadius } from '../../constants/theme';
 import StockList from '../../components/stocks/StockList';
+import { useSheetContext } from '../../components/sheets/SheetProvider';
 
 type FilterType = 'all' | 'strong_buys' | 'buys' | 'sells' | 'strong_sells' | 'shorts';
 
@@ -20,7 +20,7 @@ const FILTERS: { key: FilterType; label: string; icon: string }[] = [
 ];
 
 export default function ScreenerScreen() {
-  const router = useRouter();
+  const { openStockSheet } = useSheetContext();
   const { screenerResults, currentFilter, isScreening, screen, setFilter } = useAnalysisStore();
 
   useEffect(() => {
@@ -107,7 +107,7 @@ export default function ScreenerScreen() {
         isRefreshing={isScreening && screenerResults.length > 0}
         onRefresh={() => screen(currentFilter, 50)}
         variant="full"
-        onStockPress={(stock) => router.push(`/stock/${stock.ticker}`)}
+        onStockPress={(stock) => openStockSheet(stock.ticker)}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Ionicons name="search-outline" size={48} color={colors.textMuted} />

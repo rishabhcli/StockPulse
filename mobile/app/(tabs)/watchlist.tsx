@@ -11,8 +11,8 @@ import {
   Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useSheetContext } from '../../components/sheets/SheetProvider';
 import * as Haptics from 'expo-haptics';
 import { colors, spacing, fontSize, borderRadius } from '../../constants/theme';
 import Surface from '../../components/ui/Surface';
@@ -22,7 +22,7 @@ import { useAuthStore } from '../../stores/useAuthStore';
 import { Loading } from '../../components/ui/Loading';
 
 export default function WatchlistScreen() {
-  const router = useRouter();
+  const { openStockSheet } = useSheetContext();
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const {
     watchlists,
@@ -263,7 +263,7 @@ export default function WatchlistScreen() {
                 watchlist.items.map((item) => (
                   <Pressable
                     key={item.id}
-                    onPress={() => router.push(`/stock/${item.ticker}`)}
+                    onPress={() => openStockSheet(item.ticker)}
                     onLongPress={() => handleRemoveItem(item.id, item.ticker)}
                   >
                     <Surface style={styles.watchlistItem}>

@@ -23,7 +23,7 @@ try {
   GlassView = glassModule.GlassView;
   GlassContainer = glassModule.GlassContainer;
   // Cache the availability check
-  _isGlassAvailable = glassModule.isGlassEffectAPIAvailable?.() ?? false;
+  _isGlassAvailable = glassModule.isLiquidGlassAvailable?.() ?? false;
 } catch {
   _isGlassAvailable = false;
 }
@@ -224,8 +224,13 @@ export function Surface({
   // ============================================================================
   // WEB (CSS GLASSMORPHISM)
   // ============================================================================
+  const webExtras = {
+    backdropFilter: `blur(${colors.web.backdropBlur})`,
+    WebkitBackdropFilter: `blur(${colors.web.backdropBlur})`,
+    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.2)',
+  } as any;
   const content = (
-    <View style={[styles.base, styles.webGlass, style]}>
+    <View style={[styles.base, styles.webGlass, webExtras, style]}>
       {children}
     </View>
   );
@@ -274,15 +279,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.android.surfaceContainer,
   },
 
-  // Web glassmorphism
+  // Web glassmorphism (web-only CSS props applied via webGlassExtras)
   webGlass: {
     backgroundColor: colors.web.glassBackground,
     borderWidth: 1,
     borderColor: colors.web.glassBorder,
-    // @ts-ignore - web only
-    backdropFilter: `blur(${colors.web.backdropBlur})`,
-    WebkitBackdropFilter: `blur(${colors.web.backdropBlur})`,
-    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.2)',
   },
 });
 

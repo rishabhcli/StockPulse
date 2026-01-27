@@ -14,6 +14,7 @@ import ScoreCircle from '../../components/charts/ScoreCircle';
 import { IndicatorGrid } from '../../components/stocks/IndicatorCard';
 import PriceDisplay from '../../components/stocks/PriceDisplay';
 import { Loading } from '../../components/ui/Loading';
+import TappableTerm from '../../components/sheets/TappableTerm';
 
 export default function AnalyzeScreen() {
   const [ticker, setTicker] = useState('');
@@ -176,14 +177,16 @@ export default function AnalyzeScreen() {
                   size="medium"
                 />
                 <View style={styles.reasons}>
-                  {currentAnalysis.recommendation_reasons.slice(0, 3).map((reason, index) => (
+                  {currentAnalysis.recommendation_reasons.slice(0, 3).map((reason: any, index: number) => (
                     <View key={index} style={styles.reasonItem}>
                       <Ionicons
                         name="checkmark-circle"
                         size={16}
                         color={getScoreColor(currentAnalysis.investment_score)}
                       />
-                      <Text style={styles.reasonText}>{reason}</Text>
+                      <Text style={styles.reasonText}>
+                        {typeof reason === 'string' ? reason : (reason.detail || reason.factor || String(reason))}
+                      </Text>
                     </View>
                   ))}
                 </View>
@@ -220,21 +223,21 @@ export default function AnalyzeScreen() {
                   <Text style={styles.sectionTitle}>Market Sentiment</Text>
                   <Surface style={styles.sentimentCard}>
                     <View style={styles.sentimentRow}>
-                      <Text style={styles.sentimentLabel}>VIX</Text>
+                      <TappableTerm displayName="VIX" style={styles.sentimentLabel} />
                       <Text style={styles.sentimentValue}>
-                        {currentAnalysis.market_sentiment.vix.toFixed(1)}
+                        {currentAnalysis.market_sentiment.vix?.toFixed(1) ?? 'N/A'}
                       </Text>
                     </View>
                     <View style={styles.sentimentRow}>
-                      <Text style={styles.sentimentLabel}>Fear & Greed</Text>
+                      <TappableTerm displayName="Fear & Greed" style={styles.sentimentLabel} />
                       <Text style={styles.sentimentValue}>
-                        {currentAnalysis.market_sentiment.fear_greed_index} ({currentAnalysis.market_sentiment.fear_greed_label})
+                        {currentAnalysis.market_sentiment.fear_greed_index} ({currentAnalysis.market_sentiment.fear_greed_label ?? 'N/A'})
                       </Text>
                     </View>
                     <View style={styles.sentimentRow}>
                       <Text style={styles.sentimentLabel}>Overall</Text>
                       <Text style={styles.sentimentValue}>
-                        {currentAnalysis.market_sentiment.overall_sentiment}
+                        {currentAnalysis.market_sentiment.overall_sentiment ?? 'N/A'}
                       </Text>
                     </View>
                   </Surface>

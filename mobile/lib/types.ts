@@ -135,8 +135,42 @@ export interface ScreenerResult {
   investment_score: number;
   current_price: number;
   price_change_pct: number;
+  dollar_change?: number;
   recommendation: string;
+  confidence?: string;
+  rsi?: number;
   sector?: string;
+  industry?: string;
+  market_cap?: number;
+  market_cap_display?: string;
+  size_category?: string;
+  country?: string;
+  description?: string;
+  employees?: number;
+  employees_display?: string;
+}
+
+export interface PennyStock {
+  ticker: string;
+  company_name: string;
+  sector: string;
+  description: string;
+  price: number;
+  current_price: number;
+  change_pct: number;
+  score: number;
+  rsi: number;
+  volatility: number;
+  recommendation: string;
+}
+
+export interface PennyStockData {
+  buy: PennyStock[];
+  hold: PennyStock[];
+  sell: PennyStock[];
+  short: PennyStock[];
+  stocks: PennyStock[];
+  count: number;
 }
 
 export interface MarketSnapshot {
@@ -144,7 +178,9 @@ export interface MarketSnapshot {
   top_picks: ScreenerResult[];
   gainers: ScreenerResult[];
   losers: ScreenerResult[];
+  shorts: ScreenerResult[];
   indices: IndexData[];
+  penny_stocks: PennyStock[];
 }
 
 export interface IndexData {

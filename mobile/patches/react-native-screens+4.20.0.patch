@@ -1,0 +1,49 @@
+diff --git a/node_modules/react-native-screens/lib/commonjs/index.js b/node_modules/react-native-screens/lib/commonjs/index.js
+index 20263dd..9a0001f 100644
+--- a/node_modules/react-native-screens/lib/commonjs/index.js
++++ b/node_modules/react-native-screens/lib/commonjs/index.js
+@@ -221,6 +221,19 @@ var _utils = require("./utils");
+ var _flags = require("./flags");
+ var _useTransitionProgress = _interopRequireDefault(require("./useTransitionProgress"));
+ var _tabs = _interopRequireDefault(require("./components/tabs"));
++var _TabsHost = _interopRequireDefault(require("./components/tabs/TabsHost"));
++var _TabsScreen = _interopRequireDefault(require("./components/tabs/TabsScreen"));
++// expo-router/unstable-native-tabs expects BottomTabs and BottomTabsScreen as
++// top-level named exports. react-native-screens 4.20 only exposes them via
++// Tabs.Host / Tabs.Screen. Bridge the gap with aliases.
++Object.defineProperty(exports, "BottomTabs", {
++  enumerable: true,
++  get: function () { return _TabsHost.default; }
++});
++Object.defineProperty(exports, "BottomTabsScreen", {
++  enumerable: true,
++  get: function () { return _TabsScreen.default; }
++});
+ function _interopRequireDefault(e) { return e && e.__esModule ? e : { default: e }; }
+ function _getRequireWildcardCache(e) { if ("function" != typeof WeakMap) return null; var r = new WeakMap(), t = new WeakMap(); return (_getRequireWildcardCache = function (e) { return e ? t : r; })(e); }
+ function _interopRequireWildcard(e, r) { if (!r && e && e.__esModule) return e; if (null === e || "object" != typeof e && "function" != typeof e) return { default: e }; var t = _getRequireWildcardCache(r); if (t && t.has(e)) return t.get(e); var n = { __proto__: null }, a = Object.defineProperty && Object.getOwnPropertyDescriptor; for (var u in e) if ("default" !== u && {}.hasOwnProperty.call(e, u)) { var i = a ? Object.getOwnPropertyDescriptor(e, u) : null; i && (i.get || i.set) ? Object.defineProperty(n, u, i) : n[u] = e[u]; } return n.default = e, t && t.set(e, n), n; }
+diff --git a/node_modules/react-native-screens/lib/module/index.js b/node_modules/react-native-screens/lib/module/index.js
+index 48eded4..03b5056 100644
+--- a/node_modules/react-native-screens/lib/module/index.js
++++ b/node_modules/react-native-screens/lib/module/index.js
+@@ -40,4 +40,6 @@ export { default as useTransitionProgress } from './useTransitionProgress';
+  * EXPERIMENTAL API BELOW. MIGHT CHANGE W/O ANY NOTICE
+  */
+ export { default as Tabs } from './components/tabs';
++export { default as BottomTabs } from './components/tabs/TabsHost';
++export { default as BottomTabsScreen } from './components/tabs/TabsScreen';
+ //# sourceMappingURL=index.js.map
+\ No newline at end of file
+diff --git a/node_modules/react-native-screens/src/index.tsx b/node_modules/react-native-screens/src/index.tsx
+index 65104e2..f441972 100644
+--- a/node_modules/react-native-screens/src/index.tsx
++++ b/node_modules/react-native-screens/src/index.tsx
+@@ -63,3 +63,8 @@ export { default as useTransitionProgress } from './useTransitionProgress';
+  * EXPERIMENTAL API BELOW. MIGHT CHANGE W/O ANY NOTICE
+  */
+ export { default as Tabs } from './components/tabs';
++
++// expo-router/unstable-native-tabs expects BottomTabs and BottomTabsScreen as
++// top-level named exports. Alias Tabs.Host / Tabs.Screen.
++export { default as BottomTabs } from './components/tabs/TabsHost';
++export { default as BottomTabsScreen } from './components/tabs/TabsScreen';

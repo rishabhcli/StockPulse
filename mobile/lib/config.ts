@@ -49,7 +49,7 @@ export const API_URL: string = (() => {
 export const config = {
   api: {
     url: API_URL,
-    timeout: 30000,
+    timeout: 90000,
   },
   app: {
     name: 'StockPulse',

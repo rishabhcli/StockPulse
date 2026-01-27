@@ -6,22 +6,24 @@ import { colors, borderRadius } from '../../constants/theme';
 
 // ============================================================================
 // iOS 26 NATIVE TABS (Liquid Glass)
-// Uses Apple's real UITabBarController — automatic Liquid Glass appearance,
-// tab bar minimization on scroll, SF Symbol support.
 // ============================================================================
 
 let NativeTabs: any = null;
-let hasNativeTabs = false;
+let NativeLabel: any = null;
+let NativeIcon: any = null;
 
 if (Platform.OS === 'ios') {
   try {
     const mod = require('expo-router/unstable-native-tabs');
     NativeTabs = mod.NativeTabs;
-    hasNativeTabs = !!NativeTabs;
+    NativeLabel = mod.Label;
+    NativeIcon = mod.Icon;
   } catch {
-    hasNativeTabs = false;
+    // Not available — fall back to JS tabs
   }
 }
+
+const hasNativeTabs = Platform.OS === 'ios' && NativeTabs != null;
 
 // ============================================================================
 // TAB BAR ICON COMPONENT (for JS Tabs fallback)
@@ -53,10 +55,12 @@ function TabIcon({ name, color, size, focused }: TabIconProps) {
 
 // ============================================================================
 // iOS 26 NATIVE TABS LAYOUT
+// 5 visible tabs: Overview, Analyze, Screener, Trading, AI Chat
+// Hidden screens (navigable via router.push): earnings, watchlist, profile
 // ============================================================================
 
 function IOSNativeTabLayout() {
-  if (!NativeTabs) return null;
+  if (!NativeTabs || !NativeLabel || !NativeIcon) return null;
 
   return (
     <NativeTabs
@@ -64,53 +68,35 @@ function IOSNativeTabLayout() {
       minimizeBehavior="onScrollDown"
     >
       <NativeTabs.Trigger name="index">
-        <NativeTabs.Trigger.Label>Overview</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon
-          sf={{ default: 'house', selected: 'house.fill' }}
-        />
+        <NativeLabel>Overview</NativeLabel>
+        <NativeIcon sf={{ default: 'house', selected: 'house.fill' }} />
       </NativeTabs.Trigger>
 
       <NativeTabs.Trigger name="analyze">
-        <NativeTabs.Trigger.Label>Analyze</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon
-          sf={{ default: 'magnifyingglass', selected: 'magnifyingglass' }}
-        />
+        <NativeLabel>Analyze</NativeLabel>
+        <NativeIcon sf={{ default: 'magnifyingglass', selected: 'magnifyingglass' }} />
       </NativeTabs.Trigger>
 
       <NativeTabs.Trigger name="screener">
-        <NativeTabs.Trigger.Label>Screener</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon
-          sf={{ default: 'chart.bar', selected: 'chart.bar.fill' }}
-        />
-      </NativeTabs.Trigger>
-
-      <NativeTabs.Trigger name="earnings">
-        <NativeTabs.Trigger.Label>Earnings</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon
-          sf={{ default: 'calendar', selected: 'calendar' }}
-        />
+        <NativeLabel>Screener</NativeLabel>
+        <NativeIcon sf={{ default: 'chart.bar', selected: 'chart.bar.fill' }} />
       </NativeTabs.Trigger>
 
       <NativeTabs.Trigger name="trading">
-        <NativeTabs.Trigger.Label>Trading</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon
-          sf={{ default: 'briefcase', selected: 'briefcase.fill' }}
-        />
+        <NativeLabel>Trading</NativeLabel>
+        <NativeIcon sf={{ default: 'briefcase', selected: 'briefcase.fill' }} />
       </NativeTabs.Trigger>
 
-      <NativeTabs.Trigger name="watchlist">
-        <NativeTabs.Trigger.Label>Watchlist</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon
-          sf={{ default: 'bookmark', selected: 'bookmark.fill' }}
-        />
+      <NativeTabs.Trigger name="chat">
+        <NativeLabel>AI</NativeLabel>
+        <NativeIcon sf={{ default: 'sparkles', selected: 'sparkles' }} />
       </NativeTabs.Trigger>
 
-      <NativeTabs.Trigger name="profile">
-        <NativeTabs.Trigger.Label>Profile</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon
-          sf={{ default: 'person.circle', selected: 'person.circle.fill' }}
-        />
-      </NativeTabs.Trigger>
+      {/* These screens exist but are NOT in the tab bar.
+          Per Expo docs, NativeTabs hidden="true" makes screens
+          completely un-navigable, so we simply omit the triggers.
+          The screens are still registered as tab routes and
+          can be navigated to via router.push(). */}
     </NativeTabs>
   );
 }
@@ -134,9 +120,12 @@ function JSTabLayout() {
           ? styles.tabBarIOS
           : Platform.OS === 'android'
           ? styles.tabBarAndroid
-          : styles.tabBarWeb,
+          : [styles.tabBarWeb, {
+              backdropFilter: `blur(${colors.web.backdropBlur})`,
+              WebkitBackdropFilter: `blur(${colors.web.backdropBlur})`,
+            } as any],
 
-        // iOS fallback: System blur background (matches native UITabBarController)
+        // iOS fallback: System blur background
         tabBarBackground: Platform.OS === 'ios' ? () => (
           <View style={StyleSheet.absoluteFill}>
             <BlurView
@@ -144,12 +133,12 @@ function JSTabLayout() {
               tint="systemChromeMaterialDark"
               style={StyleSheet.absoluteFill}
             />
-            {/* Top hairline separator (Apple style) */}
             <View style={styles.iosTabBarSeparator} />
           </View>
         ) : undefined,
       }}
     >
+      {/* === 5 visible tabs === */}
       <Tabs.Screen
         name="index"
         options={{
@@ -178,15 +167,6 @@ function JSTabLayout() {
         }}
       />
       <Tabs.Screen
-        name="earnings"
-        options={{
-          title: 'Earnings',
-          tabBarIcon: ({ color, size, focused }) => (
-            <TabIcon name="calendar" color={color} size={size} focused={focused} />
-          ),
-        }}
-      />
-      <Tabs.Screen
         name="trading"
         options={{
           title: 'Trading',
@@ -196,49 +176,40 @@ function JSTabLayout() {
         }}
       />
       <Tabs.Screen
-        name="watchlist"
+        name="chat"
         options={{
-          title: 'Watchlist',
+          title: 'AI',
           tabBarIcon: ({ color, size, focused }) => (
-            <TabIcon name="bookmark" color={color} size={size} focused={focused} />
+            <TabIcon name="sparkles" color={color} size={size} focused={focused} />
           ),
         }}
       />
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: 'Profile',
-          tabBarIcon: ({ color, size, focused }) => (
-            <TabIcon name="person-circle" color={color} size={size} focused={focused} />
-          ),
-        }}
-      />
+
+      {/* === Hidden tabs — navigable via router.push, not shown in tab bar === */}
+      <Tabs.Screen name="earnings" options={{ href: null }} />
+      <Tabs.Screen name="watchlist" options={{ href: null }} />
+      <Tabs.Screen name="profile" options={{ href: null }} />
     </Tabs>
   );
 }
 
 // ============================================================================
-// MAIN EXPORT — Pick native or JS tabs
+// MAIN EXPORT
 // ============================================================================
 
 export default function TabLayout() {
-  // iOS 26+: Use Apple's native UITabBarController with Liquid Glass
   if (hasNativeTabs) {
     return <IOSNativeTabLayout />;
   }
-
-  // Android / Web / iOS < 26: Use JS tabs with BlurView fallback
   return <JSTabLayout />;
 }
 
 // ============================================================================
-// STYLES (JS Tabs only — NativeTabs handles its own styling)
+// STYLES
 // ============================================================================
 
 const styles = StyleSheet.create({
-  // ==========================================================================
-  // iOS TAB BAR FALLBACK — Native Blur (matches UITabBarController)
-  // ==========================================================================
+  // iOS TAB BAR FALLBACK
   tabBarIOS: {
     position: 'absolute',
     borderTopWidth: 0,
@@ -257,9 +228,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.ios.separatorThin,
   },
 
-  // ==========================================================================
-  // ANDROID TAB BAR — Material Design 3 NavigationBar
-  // ==========================================================================
+  // ANDROID TAB BAR
   tabBarAndroid: {
     backgroundColor: colors.android.surfaceContainer,
     borderTopWidth: 0,
@@ -275,9 +244,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
   },
 
-  // ==========================================================================
-  // WEB TAB BAR — Glassmorphism
-  // ==========================================================================
+  // WEB TAB BAR
   tabBarWeb: {
     backgroundColor: colors.web.glassBackground,
     borderTopWidth: 1,
@@ -285,14 +252,9 @@ const styles = StyleSheet.create({
     height: 65,
     paddingBottom: 8,
     paddingTop: 8,
-    // @ts-ignore - web only
-    backdropFilter: `blur(${colors.web.backdropBlur})`,
-    WebkitBackdropFilter: `blur(${colors.web.backdropBlur})`,
   },
 
-  // ==========================================================================
   // SHARED
-  // ==========================================================================
   tabBarLabel: {
     fontSize: 10,
     fontWeight: '600',

@@ -1,7 +1,8 @@
 import { useEffect } from 'react';
 import { Stack, Redirect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { Platform } from 'react-native';
+import { Platform, StyleSheet } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { PaperProvider, MD3DarkTheme } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { colors } from '../constants/theme';
@@ -9,6 +10,7 @@ import { useAuthStore } from '../stores/useAuthStore';
 import { useTradingStore } from '../stores/useTradingStore';
 import { useWatchlistStore } from '../stores/useWatchlistStore';
 import { Loading } from '../components/ui/Loading';
+import SheetProvider from '../components/sheets/SheetProvider';
 
 // ============================================================================
 // MATERIAL DESIGN 3 THEME CONFIGURATION
@@ -131,42 +133,52 @@ export default function RootLayout() {
   }
 
   return (
-    <SafeAreaProvider>
-      <PaperProvider theme={paperTheme}>
-        <StatusBar style="light" />
-        {/* Redirect to login if not authenticated */}
-        {!isAuthenticated && <Redirect href="/auth/login" />}
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: colors.background },
-            animation: Platform.select({
-              ios: 'default',
-              android: 'fade_from_bottom',
-              default: 'fade',
-            }),
-          }}
-        >
-          <Stack.Screen name="auth" options={{ headerShown: false }} />
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen
-            name="stock/[ticker]"
-            options={{
-              headerShown: true,
-              headerStyle: {
-                backgroundColor: Platform.OS === 'ios'
-                  ? colors.ios.glassThick
-                  : colors.android.surfaceContainer,
-              },
-              headerTintColor: colors.text,
-              headerBackTitle: 'Back',
-              headerShadowVisible: false,
-              presentation: Platform.OS === 'ios' ? 'card' : 'modal',
-              animation: Platform.OS === 'ios' ? 'default' : 'slide_from_right',
+    <GestureHandlerRootView style={layoutStyles.root}>
+      <SafeAreaProvider>
+        <PaperProvider theme={paperTheme}>
+          <SheetProvider>
+            <StatusBar style="light" />
+            {/* Redirect to login if not authenticated */}
+            {!isAuthenticated && <Redirect href="/auth/login" />}
+            <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: colors.background },
+              animation: Platform.select({
+                ios: 'default',
+                android: 'fade_from_bottom',
+                default: 'fade',
+              }),
             }}
-          />
-        </Stack>
-      </PaperProvider>
-    </SafeAreaProvider>
+          >
+            <Stack.Screen name="auth" options={{ headerShown: false }} />
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen
+              name="stock/[ticker]"
+              options={{
+                headerShown: true,
+                headerStyle: {
+                  backgroundColor: Platform.OS === 'ios'
+                    ? colors.ios.glassThick
+                    : colors.android.surfaceContainer,
+                },
+                headerTintColor: colors.text,
+                headerBackTitle: 'Back',
+                headerShadowVisible: false,
+                presentation: Platform.OS === 'ios' ? 'card' : 'modal',
+                animation: Platform.OS === 'ios' ? 'default' : 'slide_from_right',
+              }}
+            />
+            </Stack>
+          </SheetProvider>
+        </PaperProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
+
+const layoutStyles = StyleSheet.create({
+  root: {
+    flex: 1,
+  },
+});

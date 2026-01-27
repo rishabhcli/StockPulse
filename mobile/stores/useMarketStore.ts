@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { MarketSnapshot, MarketSentiment, ScreenerResult, IndexData } from '../lib/types';
+import { MarketSnapshot, MarketSentiment, ScreenerResult, IndexData, PennyStock } from '../lib/types';
 import { getMarketSnapshot, getMarketSentiment, screenStocks } from '../lib/api';
 
 interface MarketState {
@@ -8,7 +8,9 @@ interface MarketState {
   topPicks: ScreenerResult[];
   gainers: ScreenerResult[];
   losers: ScreenerResult[];
+  shorts: ScreenerResult[];
   indices: IndexData[];
+  pennyStocks: PennyStock[];
 
   // Loading states
   isLoading: boolean;
@@ -27,7 +29,9 @@ export const useMarketStore = create<MarketState>((set, get) => ({
   topPicks: [],
   gainers: [],
   losers: [],
+  shorts: [],
   indices: [],
+  pennyStocks: [],
   isLoading: false,
   isRefreshing: false,
   error: null,
@@ -44,7 +48,9 @@ export const useMarketStore = create<MarketState>((set, get) => ({
         topPicks: snapshot.top_picks,
         gainers: snapshot.gainers,
         losers: snapshot.losers,
+        shorts: snapshot.shorts,
         indices: snapshot.indices,
+        pennyStocks: snapshot.penny_stocks,
         isLoading: false,
       });
     } catch (error) {
@@ -65,7 +71,9 @@ export const useMarketStore = create<MarketState>((set, get) => ({
         topPicks: snapshot.top_picks,
         gainers: snapshot.gainers,
         losers: snapshot.losers,
+        shorts: snapshot.shorts,
         indices: snapshot.indices,
+        pennyStocks: snapshot.penny_stocks,
         isRefreshing: false,
       });
     } catch (error) {

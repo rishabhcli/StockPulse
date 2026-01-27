@@ -11,6 +11,7 @@ import Animated, {
 import { colors, borderRadius, spacing, fontSize, animation } from '../../constants/theme';
 import { MarketSentiment } from '../../lib/types';
 import Surface, { GlassContainer, isLiquidGlassAvailable } from '../ui/Surface';
+import TappableTerm from '../sheets/TappableTerm';
 
 // ============================================================================
 // iOS 26 LIQUID GLASS — expo-glass-effect
@@ -40,13 +41,14 @@ interface SentimentItemProps {
   color?: string;
   icon?: keyof typeof Ionicons.glyphMap;
   index: number;
+  glossaryKey?: string;
 }
 
 // ============================================================================
 // SENTIMENT ITEM COMPONENT
 // ============================================================================
 
-function SentimentItem({ label, value, signal, color, icon, index }: SentimentItemProps) {
+function SentimentItem({ label, value, signal, color, icon, index, glossaryKey }: SentimentItemProps) {
   const opacity = useSharedValue(0);
   const scale = useSharedValue(0.8);
 
@@ -62,7 +64,11 @@ function SentimentItem({ label, value, signal, color, icon, index }: SentimentIt
 
   return (
     <Animated.View style={[styles.item, animatedStyle]}>
-      <Text style={styles.label}>{label}</Text>
+      {glossaryKey ? (
+        <TappableTerm displayName={label} glossaryKey={glossaryKey} style={styles.label} />
+      ) : (
+        <Text style={styles.label}>{label}</Text>
+      )}
       {icon ? (
         <View style={styles.iconContainer}>
           <Ionicons name={icon} size={24} color={color || colors.text} />
@@ -98,8 +104,8 @@ export function SentimentHeader({ sentiment }: SentimentHeaderProps) {
     return colors.strongSell;
   };
 
-  const getSentimentIcon = (sentiment: string): keyof typeof Ionicons.glyphMap => {
-    switch (sentiment.toLowerCase()) {
+  const getSentimentIcon = (sentiment: string | undefined): keyof typeof Ionicons.glyphMap => {
+    switch ((sentiment ?? '').toLowerCase()) {
       case 'bullish':
         return 'trending-up';
       case 'bearish':
@@ -109,8 +115,8 @@ export function SentimentHeader({ sentiment }: SentimentHeaderProps) {
     }
   };
 
-  const getSentimentColor = (sentiment: string) => {
-    switch (sentiment.toLowerCase()) {
+  const getSentimentColor = (sentiment: string | undefined) => {
+    switch ((sentiment ?? '').toLowerCase()) {
       case 'bullish':
         return colors.strongBuy;
       case 'bearish':
@@ -129,6 +135,7 @@ export function SentimentHeader({ sentiment }: SentimentHeaderProps) {
         signal={sentiment.vix_signal}
         color={getVixColor(sentiment.vix)}
         index={0}
+        glossaryKey="vix"
       />
 
       {/* Divider */}
@@ -141,6 +148,7 @@ export function SentimentHeader({ sentiment }: SentimentHeaderProps) {
         signal={sentiment.fear_greed_label}
         color={getFearGreedColor(sentiment.fear_greed_index)}
         index={1}
+        glossaryKey="fear_greed"
       />
 
       {/* Divider */}
