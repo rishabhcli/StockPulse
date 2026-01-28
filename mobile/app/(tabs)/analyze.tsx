@@ -1,14 +1,24 @@
-import React, { useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, ScrollView, StyleSheet, KeyboardAvoidingView, Platform, Pressable, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withDelay,
+  withTiming,
+  FadeIn,
+  FadeInDown,
+} from 'react-native-reanimated';
 import { useAnalysisStore } from '../../stores/useAnalysisStore';
-import { colors, spacing, fontSize, fontFamily, borderRadius, getScoreColor, getScoreLabel } from '../../constants/theme';
+import { colors, spacing, fontSize, fontFamily, borderRadius, getScoreColor, animation } from '../../constants/theme';
 import { formatPrice, formatPercent } from '../../lib/utils';
 import Input from '../../components/ui/Input';
 import Button from '../../components/ui/Button';
 import Surface from '../../components/ui/Surface';
+import { isLiquidGlassAvailable } from '../../components/ui/Surface';
 import Badge from '../../components/ui/Badge';
 import ScoreCircle from '../../components/charts/ScoreCircle';
 import { IndicatorGrid } from '../../components/stocks/IndicatorCard';
@@ -16,9 +26,228 @@ import PriceDisplay from '../../components/stocks/PriceDisplay';
 import { Loading } from '../../components/ui/Loading';
 import TappableTerm from '../../components/sheets/TappableTerm';
 
+// iOS 26 Liquid Glass
+let GlassView: any = null;
+try {
+  const glassModule = require('expo-glass-effect');
+  GlassView = glassModule.GlassView;
+} catch {}
+
+// ============================================================================
+// ANIMATED HEADER
+// ============================================================================
+
+function AnimatedHeader() {
+  const opacity = useSharedValue(0);
+  const translateY = useSharedValue(-10);
+
+  useEffect(() => {
+    opacity.value = withTiming(1, { duration: 300 });
+    translateY.value = withSpring(0, animation.spring.gentle);
+  }, []);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+    transform: [{ translateY: translateY.value }],
+  }));
+
+  return (
+    <Animated.View style={[styles.header, animatedStyle]}>
+      <Text style={styles.title}>Analyze Stock</Text>
+      <Text style={styles.subtitle}>Get AI-powered investment insights</Text>
+    </Animated.View>
+  );
+}
+
+// ============================================================================
+// SEARCH SECTION WITH GLASS
+// ============================================================================
+
+interface GlassSearchProps {
+  ticker: string;
+  onTickerChange: (text: string) => void;
+  onAnalyze: () => void;
+  isAnalyzing: boolean;
+}
+
+function GlassSearch({ ticker, onTickerChange, onAnalyze, isAnalyzing }: GlassSearchProps) {
+  const useGlass = isLiquidGlassAvailable() && GlassView;
+  const opacity = useSharedValue(0);
+  const scale = useSharedValue(0.98);
+
+  useEffect(() => {
+    opacity.value = withDelay(100, withTiming(1, { duration: 300 }));
+    scale.value = withDelay(100, withSpring(1, animation.spring.gentle));
+  }, []);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+    transform: [{ scale: scale.value }],
+  }));
+
+  const searchContent = (
+    <>
+      <Input
+        placeholder="Enter ticker symbol (e.g., AAPL)"
+        value={ticker}
+        onChangeText={onTickerChange}
+        autoCapitalize="characters"
+        autoCorrect={false}
+        leftIcon={<Ionicons name="search" size={20} color={colors.textMuted} />}
+        onSubmitEditing={onAnalyze}
+        returnKeyType="search"
+      />
+      <Button
+        title="Analyze"
+        onPress={onAnalyze}
+        loading={isAnalyzing}
+        disabled={!ticker.trim()}
+        style={styles.analyzeButton}
+      />
+    </>
+  );
+
+  if (useGlass) {
+    return (
+      <Animated.View style={[styles.searchContainerGlassWrapper, animatedStyle]}>
+        <GlassView
+          style={styles.searchContainerGlass}
+          glassEffectStyle="clear"
+          tintColor={colors.ios.glassTint}
+        >
+          {searchContent}
+        </GlassView>
+      </Animated.View>
+    );
+  }
+
+  return (
+    <Animated.View style={[styles.searchContainer, animatedStyle]}>
+      {searchContent}
+    </Animated.View>
+  );
+}
+
+// ============================================================================
+// ANIMATED SCORE BREAKDOWN ITEM
+// ============================================================================
+
+interface ScoreBreakdownItemProps {
+  label: string;
+  score: number;
+  delay: number;
+}
+
+function ScoreBreakdownItem({ label, score, delay }: ScoreBreakdownItemProps) {
+  const opacity = useSharedValue(0);
+  const scale = useSharedValue(0.9);
+
+  useEffect(() => {
+    opacity.value = withDelay(delay, withTiming(1, { duration: 300 }));
+    scale.value = withDelay(delay, withSpring(1, animation.spring.bouncy));
+  }, [delay]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+    transform: [{ scale: scale.value }],
+  }));
+
+  const useGlass = isLiquidGlassAvailable() && GlassView;
+
+  if (useGlass) {
+    return (
+      <Animated.View style={[styles.scoreItemGlassWrapper, animatedStyle]}>
+        <GlassView style={styles.scoreItemGlass} glassEffectStyle="clear">
+          <Text style={styles.scoreLabel}>{label}</Text>
+          <Text style={[styles.scoreValue, { color: getScoreColor(score) }]}>
+            {score}
+          </Text>
+        </GlassView>
+      </Animated.View>
+    );
+  }
+
+  return (
+    <Animated.View style={[styles.scoreItem, animatedStyle]}>
+      <Text style={styles.scoreLabel}>{label}</Text>
+      <Text style={[styles.scoreValue, { color: getScoreColor(score) }]}>
+        {score}
+      </Text>
+    </Animated.View>
+  );
+}
+
+// ============================================================================
+// QUICK PICKS SECTION (shown when no analysis)
+// ============================================================================
+
+interface QuickPicksProps {
+  stocks: { ticker: string; company_name: string; investment_score: number; current_price: number; price_change_pct: number }[];
+  onSelect: (ticker: string) => void;
+  isLoading: boolean;
+}
+
+function QuickPicks({ stocks, onSelect, isLoading }: QuickPicksProps) {
+  if (isLoading) {
+    return (
+      <View style={styles.quickPicksContainer}>
+        <Text style={styles.quickPicksTitle}>Top Picks</Text>
+        <ActivityIndicator size="small" color={colors.primary} style={{ marginTop: spacing.md }} />
+      </View>
+    );
+  }
+
+  if (stocks.length === 0) return null;
+
+  return (
+    <Animated.View entering={FadeIn.delay(200)} style={styles.quickPicksContainer}>
+      <Text style={styles.quickPicksTitle}>Top Picks</Text>
+      <Text style={styles.quickPicksSubtitle}>Tap to analyze</Text>
+      <View style={styles.quickPicksGrid}>
+        {stocks.slice(0, 6).map((stock, index) => (
+          <Animated.View
+            key={stock.ticker}
+            entering={FadeInDown.delay(100 + index * 50).duration(200)}
+          >
+            <Pressable
+              onPress={() => onSelect(stock.ticker)}
+              style={styles.quickPickCard}
+            >
+              <View style={[styles.quickPickScore, { backgroundColor: getScoreColor(stock.investment_score) }]}>
+                <Text style={styles.quickPickScoreText}>{Math.round(stock.investment_score)}</Text>
+              </View>
+              <View style={styles.quickPickInfo}>
+                <Text style={styles.quickPickTicker}>{stock.ticker}</Text>
+                <Text style={styles.quickPickPrice}>{formatPrice(stock.current_price)}</Text>
+              </View>
+              <Text style={[
+                styles.quickPickChange,
+                stock.price_change_pct >= 0 ? styles.positive : styles.negative
+              ]}>
+                {stock.price_change_pct >= 0 ? '+' : ''}{formatPercent(stock.price_change_pct)}
+              </Text>
+            </Pressable>
+          </Animated.View>
+        ))}
+      </View>
+    </Animated.View>
+  );
+}
+
+// ============================================================================
+// MAIN COMPONENT
+// ============================================================================
+
 export default function AnalyzeScreen() {
   const [ticker, setTicker] = useState('');
-  const { currentAnalysis, isAnalyzing, error, analyze, clearError } = useAnalysisStore();
+  const { currentAnalysis, isAnalyzing, error, analyze, clearError, screenerResults, isScreening, screen } = useAnalysisStore();
+
+  // Fetch top picks on mount
+  useEffect(() => {
+    if (screenerResults.length === 0) {
+      screen('strong_buys', 10);
+    }
+  }, []);
 
   const handleAnalyze = async () => {
     if (!ticker.trim()) return;
@@ -27,6 +256,15 @@ export default function AnalyzeScreen() {
     }
     clearError();
     await analyze(ticker.trim().toUpperCase());
+  };
+
+  const handleQuickPick = async (selected: string) => {
+    if (Platform.OS !== 'web') {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    setTicker(selected);
+    clearError();
+    await analyze(selected);
   };
 
   // Build indicators from analysis
@@ -105,39 +343,23 @@ export default function AnalyzeScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Header */}
-          <View style={styles.header}>
-            <Text style={styles.title}>Analyze Stock</Text>
-            <Text style={styles.subtitle}>Get AI-powered investment insights</Text>
-          </View>
+          {/* Animated Header */}
+          <AnimatedHeader />
 
-          {/* Search */}
-          <View style={styles.searchContainer}>
-            <Input
-              placeholder="Enter ticker symbol (e.g., AAPL)"
-              value={ticker}
-              onChangeText={setTicker}
-              autoCapitalize="characters"
-              autoCorrect={false}
-              leftIcon={<Ionicons name="search" size={20} color={colors.textMuted} />}
-              onSubmitEditing={handleAnalyze}
-              returnKeyType="search"
-            />
-            <Button
-              title="Analyze"
-              onPress={handleAnalyze}
-              loading={isAnalyzing}
-              disabled={!ticker.trim()}
-              style={styles.analyzeButton}
-            />
-          </View>
+          {/* Glass Search Container */}
+          <GlassSearch
+            ticker={ticker}
+            onTickerChange={setTicker}
+            onAnalyze={handleAnalyze}
+            isAnalyzing={isAnalyzing}
+          />
 
           {/* Error */}
           {error && (
-            <View style={styles.errorContainer}>
+            <Animated.View entering={FadeIn.duration(200)} style={styles.errorContainer}>
               <Ionicons name="alert-circle" size={20} color={colors.error} />
               <Text style={styles.errorText}>{error}</Text>
-            </View>
+            </Animated.View>
           )}
 
           {/* Loading */}
@@ -145,9 +367,21 @@ export default function AnalyzeScreen() {
             <Loading message={`Analyzing ${ticker.toUpperCase()}...`} />
           )}
 
+          {/* Quick Picks - shown when no analysis */}
+          {!currentAnalysis && !isAnalyzing && (
+            <QuickPicks
+              stocks={screenerResults}
+              onSelect={handleQuickPick}
+              isLoading={isScreening}
+            />
+          )}
+
           {/* Analysis Results */}
           {currentAnalysis && !isAnalyzing && (
-            <View style={styles.results}>
+            <Animated.View
+              style={styles.results}
+              entering={FadeInDown.duration(400).delay(100)}
+            >
               {/* Stock Header */}
               <Surface style={styles.stockHeader}>
                 <View style={styles.stockInfo}>
@@ -196,18 +430,16 @@ export default function AnalyzeScreen() {
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Score Breakdown</Text>
                 <View style={styles.scoreBreakdown}>
-                  <View style={styles.scoreItem}>
-                    <Text style={styles.scoreLabel}>Technical</Text>
-                    <Text style={[styles.scoreValue, { color: getScoreColor(currentAnalysis.technical_score) }]}>
-                      {currentAnalysis.technical_score}
-                    </Text>
-                  </View>
-                  <View style={styles.scoreItem}>
-                    <Text style={styles.scoreLabel}>Fundamental</Text>
-                    <Text style={[styles.scoreValue, { color: getScoreColor(currentAnalysis.fundamental_score) }]}>
-                      {currentAnalysis.fundamental_score}
-                    </Text>
-                  </View>
+                  <ScoreBreakdownItem
+                    label="Technical"
+                    score={currentAnalysis.technical_score}
+                    delay={200}
+                  />
+                  <ScoreBreakdownItem
+                    label="Fundamental"
+                    score={currentAnalysis.fundamental_score}
+                    delay={300}
+                  />
                 </View>
               </View>
 
@@ -243,13 +475,17 @@ export default function AnalyzeScreen() {
                   </Surface>
                 </View>
               )}
-            </View>
+            </Animated.View>
           )}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
+
+// ============================================================================
+// STYLES
+// ============================================================================
 
 const styles = StyleSheet.create({
   container: {
@@ -281,6 +517,19 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     marginTop: 2,
   },
+  // Glass search container
+  searchContainerGlassWrapper: {
+    marginHorizontal: spacing.md,
+    marginTop: spacing.md,
+    borderRadius: borderRadius.lg,
+    overflow: 'hidden',
+  },
+  searchContainerGlass: {
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    overflow: 'hidden',
+  },
+  // Fallback search container
   searchContainer: {
     paddingHorizontal: spacing.md,
     marginTop: spacing.md,
@@ -356,6 +605,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing.md,
   },
+  scoreItemGlassWrapper: {
+    flex: 1,
+    borderRadius: borderRadius.lg,
+    overflow: 'hidden',
+  },
+  scoreItemGlass: {
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
   scoreItem: {
     flex: 1,
     backgroundColor: Platform.select({
@@ -397,5 +657,71 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: fontSize.sm,
     fontWeight: '600',
+  },
+
+  // Quick Picks
+  quickPicksContainer: {
+    marginHorizontal: spacing.md,
+    marginTop: spacing.lg,
+  },
+  quickPicksTitle: {
+    color: colors.text,
+    fontSize: fontSize.lg,
+    fontWeight: '600',
+  },
+  quickPicksSubtitle: {
+    color: colors.textMuted,
+    fontSize: fontSize.xs,
+    marginTop: 2,
+  },
+  quickPicksGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  quickPickCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surfaceVariant,
+    borderRadius: borderRadius.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    gap: spacing.sm,
+  },
+  quickPickScore: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  quickPickScoreText: {
+    color: colors.background,
+    fontSize: fontSize.xs,
+    fontWeight: 'bold',
+  },
+  quickPickInfo: {
+    gap: 2,
+  },
+  quickPickTicker: {
+    color: colors.text,
+    fontSize: fontSize.sm,
+    fontWeight: '600',
+  },
+  quickPickPrice: {
+    color: colors.textSecondary,
+    fontSize: fontSize.xs,
+  },
+  quickPickChange: {
+    fontSize: fontSize.xs,
+    fontWeight: '600',
+    marginLeft: 'auto',
+  },
+  positive: {
+    color: colors.strongBuy,
+  },
+  negative: {
+    color: colors.error,
   },
 });

@@ -67,7 +67,28 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   signUp: async (email, password, fullName) => {
     if (!isSupabaseEnabled) {
-      return { error: new Error('Authentication not configured') };
+      // Demo mode: allow signup without Supabase for development/testing
+      const demoUser = {
+        id: 'demo-user-001',
+        email: email || 'demo@stockpulse.app',
+        app_metadata: {},
+        user_metadata: { full_name: fullName || 'Demo User' },
+        aud: 'authenticated',
+        created_at: new Date().toISOString(),
+      } as any;
+      set({
+        session: { access_token: 'demo-token', user: demoUser } as any,
+        user: demoUser,
+        profile: {
+          id: 'demo-user-001',
+          username: 'demo_trader',
+          email: email || 'demo@stockpulse.app',
+          full_name: fullName || 'Demo User',
+          avatar_url: null,
+        },
+        isAuthenticated: true,
+      });
+      return { error: null };
     }
 
     const { data, error } = await supabase.auth.signUp({
@@ -90,7 +111,28 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   signIn: async (email, password) => {
     if (!isSupabaseEnabled) {
-      return { error: new Error('Authentication not configured') };
+      // Demo mode: allow login without Supabase for development/testing
+      const demoUser = {
+        id: 'demo-user-001',
+        email: email || 'demo@stockpulse.app',
+        app_metadata: {},
+        user_metadata: { full_name: 'Demo User' },
+        aud: 'authenticated',
+        created_at: new Date().toISOString(),
+      } as any;
+      set({
+        session: { access_token: 'demo-token', user: demoUser } as any,
+        user: demoUser,
+        profile: {
+          id: 'demo-user-001',
+          username: 'demo_trader',
+          email: email || 'demo@stockpulse.app',
+          full_name: 'Demo User',
+          avatar_url: null,
+        },
+        isAuthenticated: true,
+      });
+      return { error: null };
     }
 
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });

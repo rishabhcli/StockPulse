@@ -6,7 +6,6 @@ import {
   StyleSheet,
   Platform,
   Alert,
-  Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,6 +14,7 @@ import { useRouter } from 'expo-router';
 import { colors, spacing, fontSize, fontFamily, borderRadius } from '../../constants/theme';
 import Surface from '../../components/ui/Surface';
 import Button from '../../components/ui/Button';
+import { GlassMenuItem, GlassIconButton } from '../../components/ui/GlassMenuItem';
 import { useAuthStore } from '../../stores/useAuthStore';
 import { useTradingStore } from '../../stores/useTradingStore';
 import { useWatchlistStore } from '../../stores/useWatchlistStore';
@@ -92,9 +92,18 @@ export default function ProfileScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
+        {/* Header with Settings Button */}
         <View style={styles.header}>
           <Text style={styles.title}>Profile</Text>
+          <GlassIconButton
+            icon="settings-outline"
+            onPress={() => {
+              // TODO: Navigate to settings
+              if (Platform.OS !== 'web') {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              }
+            }}
+          />
         </View>
 
         {/* User Info */}
@@ -130,52 +139,70 @@ export default function ProfileScreen() {
           </Surface>
         </View>
 
-        {/* Menu Items */}
+        {/* Menu Items — Account */}
         <View style={styles.menuSection}>
           <Text style={styles.sectionTitle}>Account</Text>
 
-          <Pressable onPress={() => {}} style={styles.menuItem}>
-            <View style={styles.menuItemLeft}>
-              <Ionicons name="person-outline" size={20} color={colors.textSecondary} />
-              <Text style={styles.menuItemText}>Edit Profile</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
-          </Pressable>
-
-          <Pressable onPress={() => {}} style={styles.menuItem}>
-            <View style={styles.menuItemLeft}>
-              <Ionicons name="notifications-outline" size={20} color={colors.textSecondary} />
-              <Text style={styles.menuItemText}>Notifications</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
-          </Pressable>
+          <Surface style={styles.menuContainer} variant="outlined">
+            <GlassMenuItem
+              label="Edit Profile"
+              icon="person-outline"
+              onPress={() => {}}
+            />
+            <GlassMenuItem
+              label="Notifications"
+              icon="notifications-outline"
+              onPress={() => {}}
+            />
+            <GlassMenuItem
+              label="Privacy & Security"
+              icon="shield-checkmark-outline"
+              onPress={() => {}}
+            />
+          </Surface>
         </View>
 
+        {/* Menu Items — App */}
         <View style={styles.menuSection}>
           <Text style={styles.sectionTitle}>App</Text>
 
-          <Pressable onPress={() => {}} style={styles.menuItem}>
-            <View style={styles.menuItemLeft}>
-              <Ionicons name="information-circle-outline" size={20} color={colors.textSecondary} />
-              <Text style={styles.menuItemText}>About StockPulse</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
-          </Pressable>
+          <Surface style={styles.menuContainer} variant="outlined">
+            <GlassMenuItem
+              label="Appearance"
+              icon="color-palette-outline"
+              onPress={() => {}}
+            />
+            <GlassMenuItem
+              label="About StockPulse"
+              icon="information-circle-outline"
+              onPress={() => {}}
+            />
+            <GlassMenuItem
+              label="Help & Support"
+              icon="help-circle-outline"
+              onPress={() => {}}
+            />
+          </Surface>
         </View>
 
         {/* Sign Out */}
-        <View style={styles.signOutSection}>
-          <Button
-            title={signingOut ? 'Signing Out...' : 'Sign Out'}
-            onPress={handleSignOut}
-            variant="outline"
-            style={styles.signOutButton}
-          />
+        <View style={styles.menuSection}>
+          <Surface style={styles.menuContainer} variant="outlined">
+            <GlassMenuItem
+              label={signingOut ? 'Signing Out...' : 'Sign Out'}
+              icon="log-out-outline"
+              onPress={handleSignOut}
+              destructive
+              chevron={false}
+              disabled={signingOut}
+            />
+          </Surface>
         </View>
 
         {/* Footer */}
         <Text style={styles.footer}>
-          StockPulse - Educational purposes only
+          StockPulse v1.0.0{'\n'}
+          Educational purposes only
         </Text>
       </ScrollView>
     </SafeAreaView>
@@ -214,6 +241,9 @@ const styles = StyleSheet.create({
     minWidth: 120,
   },
   header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     paddingHorizontal: spacing.md,
     paddingTop: spacing.md,
     paddingBottom: spacing.sm,
@@ -293,31 +323,12 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 1,
     marginBottom: spacing.sm,
+    marginLeft: spacing.sm,
   },
-  menuItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.border,
-  },
-  menuItemLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  menuItemText: {
-    color: colors.text,
-    fontSize: fontSize.md,
-  },
-  // Sign out
-  signOutSection: {
-    paddingHorizontal: spacing.md,
-    marginTop: spacing.xl,
-  },
-  signOutButton: {
-    borderColor: colors.error,
+  menuContainer: {
+    overflow: 'hidden',
+    paddingVertical: 0,
+    paddingHorizontal: 0,
   },
   // Footer
   footer: {
@@ -325,5 +336,6 @@ const styles = StyleSheet.create({
     fontSize: fontSize.xs,
     textAlign: 'center',
     marginTop: spacing.xl,
+    lineHeight: fontSize.xs * 1.5,
   },
 });

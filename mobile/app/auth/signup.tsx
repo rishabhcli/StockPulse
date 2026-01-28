@@ -3,7 +3,15 @@ import { View, StyleSheet, KeyboardAvoidingView, Platform, ScrollView } from 're
 import { Text, TextInput, Button, HelperText } from 'react-native-paper';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../stores/useAuthStore';
-import { colors, fontFamily } from '../../constants/theme';
+import { colors, fontFamily, borderRadius, spacing } from '../../constants/theme';
+import { isLiquidGlassAvailable } from '../../components/ui/Surface';
+
+// iOS 26 Liquid Glass
+let GlassView: any = null;
+try {
+  const glassModule = require('expo-glass-effect');
+  GlassView = glassModule.GlassView;
+} catch {}
 
 export default function SignUpScreen() {
   const [fullName, setFullName] = useState('');
@@ -57,6 +65,79 @@ export default function SignUpScreen() {
           <Text variant="bodyLarge" style={styles.subtitle}>Create your account</Text>
         </View>
 
+        {isLiquidGlassAvailable() && GlassView ? (
+          <View style={styles.formGlassWrapper}>
+            <GlassView style={styles.formGlass} glassEffectStyle="regular">
+              <View style={styles.formInner}>
+                <TextInput
+                  label="Full Name (optional)"
+                  value={fullName}
+                  onChangeText={setFullName}
+                  mode="outlined"
+                  style={styles.input}
+                  outlineColor={colors.ios.glassBorderMedium}
+                  activeOutlineColor={colors.primary}
+                  textColor={colors.text}
+                />
+                <TextInput
+                  label="Email"
+                  value={email}
+                  onChangeText={setEmail}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  mode="outlined"
+                  style={styles.input}
+                  outlineColor={colors.ios.glassBorderMedium}
+                  activeOutlineColor={colors.primary}
+                  textColor={colors.text}
+                />
+                <TextInput
+                  label="Password"
+                  value={password}
+                  onChangeText={setPassword}
+                  secureTextEntry
+                  mode="outlined"
+                  style={styles.input}
+                  outlineColor={colors.ios.glassBorderMedium}
+                  activeOutlineColor={colors.primary}
+                  textColor={colors.text}
+                />
+                <TextInput
+                  label="Confirm Password"
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                  secureTextEntry
+                  mode="outlined"
+                  style={styles.input}
+                  outlineColor={colors.ios.glassBorderMedium}
+                  activeOutlineColor={colors.primary}
+                  textColor={colors.text}
+                />
+                {error ? (
+                  <HelperText type="error" visible={!!error}>{error}</HelperText>
+                ) : null}
+                <Button
+                  mode="contained"
+                  onPress={handleSignUp}
+                  loading={loading}
+                  disabled={loading}
+                  style={styles.button}
+                  buttonColor={colors.primary}
+                >
+                  Create Account
+                </Button>
+                <Button
+                  mode="text"
+                  onPress={() => router.back()}
+                  style={styles.linkButton}
+                  textColor={colors.primary}
+                >
+                  Already have an account? Sign In
+                </Button>
+              </View>
+            </GlassView>
+          </View>
+        ) : (
         <View style={styles.form}>
           <TextInput
             label="Full Name (optional)"
@@ -132,6 +213,7 @@ export default function SignUpScreen() {
             Already have an account? Sign In
           </Button>
         </View>
+        )}
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -158,6 +240,20 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     color: colors.textSecondary,
+  },
+  formGlassWrapper: {
+    width: '100%',
+    maxWidth: 400,
+    alignSelf: 'center',
+    borderRadius: borderRadius['2xl'],
+    overflow: 'hidden',
+  },
+  formGlass: {
+    borderRadius: borderRadius['2xl'],
+    overflow: 'hidden',
+  },
+  formInner: {
+    padding: spacing.lg,
   },
   form: {
     width: '100%',

@@ -3,7 +3,7 @@ import { StockAnalysis, ScreenerResult } from '../lib/types';
 import { analyzeStock, screenStocks } from '../lib/api';
 import { supabase, isSupabaseEnabled } from '../lib/supabase';
 
-type FilterType = 'all' | 'strong_buys' | 'buys' | 'sells' | 'strong_sells' | 'shorts';
+type FilterType = 'all' | 'strong_buys' | 'buys' | 'holds' | 'sells' | 'strong_sells' | 'shorts';
 
 interface AnalysisState {
   // Current analysis
@@ -85,7 +85,8 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
   },
 
   setFilter: (filter: FilterType) => {
-    set({ currentFilter: filter });
+    // Reset screening state and immediately trigger new screen
+    set({ currentFilter: filter, isScreening: false });
     get().screen(filter);
   },
 

@@ -7,6 +7,10 @@ export { Card } from './Card';
 export { Button } from './Button';
 export { Badge } from './Badge';
 export { Input } from './Input';
+export { FloatingAIButton } from './FloatingAIButton';
+export { GlassPill } from './GlassPill';
+export { GlassMenuItem, GlassIconButton } from './GlassMenuItem';
+export { GlassSearchBar } from './GlassSearchBar';
 export {
   Loading,
   Skeleton,

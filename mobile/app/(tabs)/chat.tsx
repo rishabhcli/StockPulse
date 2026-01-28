@@ -2,9 +2,29 @@ import React from 'react';
 import { View, Text, StyleSheet, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, fontSize, fontFamily } from '../../constants/theme';
+import { colors, spacing, fontSize, fontFamily, borderRadius } from '../../constants/theme';
+import { isLiquidGlassAvailable } from '../../components/ui/Surface';
+
+// iOS 26 Liquid Glass
+let GlassView: any = null;
+try {
+  const glassModule = require('expo-glass-effect');
+  GlassView = glassModule.GlassView;
+} catch {}
 
 export default function ChatScreen() {
+  const useGlass = isLiquidGlassAvailable() && GlassView;
+
+  const emptyContent = (
+    <>
+      <Ionicons name="chatbubbles-outline" size={64} color={colors.textMuted} />
+      <Text style={styles.emptyTitle}>Coming Soon</Text>
+      <Text style={styles.emptySubtitle}>
+        AI-powered stock analysis chat will be available here.
+      </Text>
+    </>
+  );
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
@@ -12,11 +32,17 @@ export default function ChatScreen() {
         <Text style={styles.subtitle}>Ask anything about stocks</Text>
       </View>
       <View style={styles.emptyState}>
-        <Ionicons name="chatbubbles-outline" size={64} color={colors.textMuted} />
-        <Text style={styles.emptyTitle}>Coming Soon</Text>
-        <Text style={styles.emptySubtitle}>
-          AI-powered stock analysis chat will be available here.
-        </Text>
+        {useGlass ? (
+          <View style={styles.glassCardWrapper}>
+            <GlassView style={styles.glassCard} glassEffectStyle="clear">
+              <View style={styles.glassCardContent}>
+                {emptyContent}
+              </View>
+            </GlassView>
+          </View>
+        ) : (
+          emptyContent
+        )}
       </View>
     </SafeAreaView>
   );
@@ -49,6 +75,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
     paddingBottom: spacing.xl * 4,
+  },
+  glassCardWrapper: {
+    borderRadius: borderRadius['2xl'],
+    overflow: 'hidden',
+    marginHorizontal: spacing.xl,
+  },
+  glassCard: {
+    borderRadius: borderRadius['2xl'],
+    overflow: 'hidden',
+  },
+  glassCardContent: {
+    padding: spacing.xl,
+    alignItems: 'center',
+    gap: spacing.sm,
   },
   emptyTitle: {
     color: colors.text,

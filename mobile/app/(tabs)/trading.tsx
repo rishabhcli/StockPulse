@@ -1,15 +1,266 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, ScrollView, StyleSheet, RefreshControl, Platform, Alert } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, RefreshControl, Platform, Alert, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { colors, spacing, fontSize, fontFamily, borderRadius } from '../../constants/theme';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withDelay,
+  withTiming,
+  interpolate,
+} from 'react-native-reanimated';
+import { colors, spacing, fontSize, fontFamily, borderRadius, animation } from '../../constants/theme';
 import Surface from '../../components/ui/Surface';
 import Button from '../../components/ui/Button';
+import { isLiquidGlassAvailable } from '../../components/ui/Surface';
 import { useTradingStore } from '../../stores/useTradingStore';
 import { useAuthStore } from '../../stores/useAuthStore';
 import { Loading } from '../../components/ui/Loading';
 import api from '../../lib/api';
+
+// ============================================================================
+// iOS 26 LIQUID GLASS
+// ============================================================================
+
+let GlassView: any = null;
+try {
+  const glassModule = require('expo-glass-effect');
+  GlassView = glassModule.GlassView;
+} catch {}
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+// ============================================================================
+// ANIMATED PORTFOLIO HERO CARD
+// ============================================================================
+
+interface PortfolioHeroProps {
+  totalValue: number;
+  cash: number;
+  totalPnL: number;
+  totalReturnPct: number;
+  formatCurrency: (value: number) => string;
+  formatPnL: (value: number) => string;
+}
+
+function PortfolioHero({ totalValue, cash, totalPnL, totalReturnPct, formatCurrency, formatPnL }: PortfolioHeroProps) {
+  const scale = useSharedValue(0.95);
+  const opacity = useSharedValue(0);
+
+  useEffect(() => {
+    opacity.value = withTiming(1, { duration: 400 });
+    scale.value = withSpring(1, animation.spring.gentle);
+  }, []);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+    transform: [{ scale: scale.value }],
+  }));
+
+  const useGlass = isLiquidGlassAvailable() && GlassView;
+
+  const cardContent = (
+    <>
+      <Text style={styles.portfolioLabel}>Portfolio Value</Text>
+      <Text style={styles.portfolioValue}>{formatCurrency(totalValue)}</Text>
+
+      <View style={styles.pnlRow}>
+        <View style={styles.pnlItem}>
+          <Text style={styles.pnlLabel}>Cash</Text>
+          <Text style={styles.pnlValueNeutral}>{formatCurrency(cash)}</Text>
+        </View>
+        <View style={styles.pnlDivider} />
+        <View style={styles.pnlItem}>
+          <Text style={styles.pnlLabel}>Total P&L</Text>
+          <Text style={[styles.pnlValue, totalPnL >= 0 ? styles.positive : styles.negative]}>
+            {formatPnL(totalPnL)} ({totalReturnPct >= 0 ? '+' : ''}{totalReturnPct.toFixed(2)}%)
+          </Text>
+        </View>
+      </View>
+    </>
+  );
+
+  if (useGlass) {
+    return (
+      <Animated.View style={[styles.portfolioCardWrapper, animatedStyle]}>
+        <GlassView
+          style={styles.portfolioCardGlass}
+          glassEffectStyle="regular"
+          tintColor={colors.ios.glassTint}
+        >
+          {cardContent}
+        </GlassView>
+      </Animated.View>
+    );
+  }
+
+  return (
+    <Animated.View style={animatedStyle}>
+      <Surface style={styles.portfolioCard}>
+        {cardContent}
+      </Surface>
+    </Animated.View>
+  );
+}
+
+// ============================================================================
+// ANIMATED POSITION CARD
+// ============================================================================
+
+interface AnimatedPositionCardProps {
+  position: any;
+  index: number;
+  formatCurrency: (value: number) => string;
+}
+
+function AnimatedPositionCard({ position, index, formatCurrency }: AnimatedPositionCardProps) {
+  const opacity = useSharedValue(0);
+  const translateX = useSharedValue(-20);
+  const pressed = useSharedValue(0);
+
+  useEffect(() => {
+    opacity.value = withDelay(index * 80, withTiming(1, { duration: 300 }));
+    translateX.value = withDelay(index * 80, withSpring(0, animation.spring.gentle));
+  }, [index]);
+
+  const handlePressIn = () => {
+    pressed.value = withSpring(1, animation.spring.snappy);
+  };
+  const handlePressOut = () => {
+    pressed.value = withSpring(0, animation.spring.bouncy);
+  };
+
+  const animatedStyle = useAnimatedStyle(() => {
+    const scale = interpolate(pressed.value, [0, 1], [1, 0.98]);
+    return {
+      opacity: opacity.value,
+      transform: [{ translateX: translateX.value }, { scale }],
+    };
+  });
+
+  const marketValue = position.quantity * position.avg_entry_price;
+
+  return (
+    <AnimatedPressable
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
+      style={animatedStyle}
+    >
+      <Surface style={styles.positionCard}>
+        <View style={styles.positionHeader}>
+          <View>
+            <View style={styles.tickerRow}>
+              <Text style={styles.positionTicker}>{position.ticker}</Text>
+              <View style={[
+                styles.sideBadge,
+                position.side === 'long' ? styles.sideBadgeLong : styles.sideBadgeShort,
+              ]}>
+                <Text style={[
+                  styles.sideBadgeText,
+                  position.side === 'long' ? styles.sideBadgeTextLong : styles.sideBadgeTextShort,
+                ]}>
+                  {position.side.toUpperCase()}
+                </Text>
+              </View>
+              {position.human_controlled && (
+                <Ionicons name="person" size={12} color={colors.info} style={{ marginLeft: 4 }} />
+              )}
+            </View>
+            <Text style={styles.positionShares}>
+              {position.quantity} shares
+            </Text>
+          </View>
+          <View style={styles.positionRight}>
+            <Text style={styles.positionPrice}>{formatCurrency(marketValue)}</Text>
+          </View>
+        </View>
+
+        <View style={styles.positionDetails}>
+          <View style={styles.detailItem}>
+            <Text style={styles.detailLabel}>Avg Cost</Text>
+            <Text style={styles.detailValue}>{formatCurrency(position.avg_entry_price)}</Text>
+          </View>
+          <View style={styles.detailItem}>
+            <Text style={styles.detailLabel}>Entry</Text>
+            <Text style={styles.detailValue}>
+              {new Date(position.entry_date).toLocaleDateString()}
+            </Text>
+          </View>
+        </View>
+      </Surface>
+    </AnimatedPressable>
+  );
+}
+
+// ============================================================================
+// ANIMATED TRADE CARD
+// ============================================================================
+
+interface AnimatedTradeCardProps {
+  trade: any;
+  index: number;
+  formatCurrency: (value: number) => string;
+}
+
+function AnimatedTradeCard({ trade, index, formatCurrency }: AnimatedTradeCardProps) {
+  const opacity = useSharedValue(0);
+  const translateY = useSharedValue(10);
+
+  useEffect(() => {
+    opacity.value = withDelay(index * 50, withTiming(1, { duration: 250 }));
+    translateY.value = withDelay(index * 50, withSpring(0, animation.spring.gentle));
+  }, [index]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+    transform: [{ translateY: translateY.value }],
+  }));
+
+  return (
+    <Animated.View style={animatedStyle}>
+      <Surface style={styles.tradeCard}>
+        <View style={styles.tradeHeader}>
+          <View style={styles.tradeLeft}>
+            <View style={[
+              styles.tradeTypeBadge,
+              (trade.trade_type === 'buy' || trade.trade_type === 'cover')
+                ? styles.tradeTypeBuy
+                : styles.tradeTypeSell,
+            ]}>
+              <Text style={styles.tradeTypeText}>
+                {trade.trade_type.toUpperCase()}
+              </Text>
+            </View>
+            <Text style={styles.tradeTicker}>{trade.ticker}</Text>
+            {trade.is_manual && (
+              <Ionicons name="person" size={10} color={colors.info} style={{ marginLeft: 4 }} />
+            )}
+          </View>
+          <View style={styles.tradeRight}>
+            <Text style={styles.tradeValue}>{formatCurrency(trade.value)}</Text>
+            <Text style={styles.tradeQty}>
+              {trade.quantity} @ {formatCurrency(trade.price)}
+            </Text>
+          </View>
+        </View>
+        {trade.reasoning ? (
+          <Text style={styles.tradeReasoning} numberOfLines={2}>
+            {trade.reasoning}
+          </Text>
+        ) : null}
+        <Text style={styles.tradeTime}>
+          {new Date(trade.executed_at).toLocaleString()}
+        </Text>
+      </Surface>
+    </Animated.View>
+  );
+}
+
+// ============================================================================
+// MAIN COMPONENT
+// ============================================================================
 
 export default function TradingScreen() {
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
@@ -46,10 +297,16 @@ export default function TradingScreen() {
   }, [fetchPositions, fetchTrades]);
 
   const handleExecuteAI = async () => {
+    if (Platform.OS !== 'web') {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    }
     setIsExecuting(true);
     try {
       await api.post('/api/trading-sim/execute');
       await Promise.all([fetchPositions(), fetchTrades(20)]);
+      if (Platform.OS !== 'web') {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
     } catch (e) {
       Alert.alert('Error', 'Failed to execute AI trading cycle');
     }
@@ -127,25 +384,15 @@ export default function TradingScreen() {
           <Text style={styles.subtitle}>AI-driven portfolio simulation</Text>
         </View>
 
-        {/* Portfolio Summary */}
-        <Surface style={styles.portfolioCard}>
-          <Text style={styles.portfolioLabel}>Portfolio Value</Text>
-          <Text style={styles.portfolioValue}>{formatCurrency(totalValue)}</Text>
-
-          <View style={styles.pnlRow}>
-            <View style={styles.pnlItem}>
-              <Text style={styles.pnlLabel}>Cash</Text>
-              <Text style={styles.pnlValueNeutral}>{formatCurrency(cash)}</Text>
-            </View>
-            <View style={styles.pnlDivider} />
-            <View style={styles.pnlItem}>
-              <Text style={styles.pnlLabel}>Total P&L</Text>
-              <Text style={[styles.pnlValue, totalPnL >= 0 ? styles.positive : styles.negative]}>
-                {formatPnL(totalPnL)} ({totalReturnPct >= 0 ? '+' : ''}{totalReturnPct.toFixed(2)}%)
-              </Text>
-            </View>
-          </View>
-        </Surface>
+        {/* Animated Portfolio Hero Card */}
+        <PortfolioHero
+          totalValue={totalValue}
+          cash={cash}
+          totalPnL={totalPnL}
+          totalReturnPct={totalReturnPct}
+          formatCurrency={formatCurrency}
+          formatPnL={formatPnL}
+        />
 
         {/* Actions */}
         <View style={styles.actionsRow}>
@@ -179,53 +426,14 @@ export default function TradingScreen() {
               <Text style={styles.emptyCardSubtext}>Run an AI trade cycle to get started</Text>
             </Surface>
           ) : (
-            positions.map((position) => {
-              const marketValue = position.quantity * position.avg_entry_price;
-              return (
-                <Surface key={position.id} style={styles.positionCard}>
-                  <View style={styles.positionHeader}>
-                    <View>
-                      <View style={styles.tickerRow}>
-                        <Text style={styles.positionTicker}>{position.ticker}</Text>
-                        <View style={[
-                          styles.sideBadge,
-                          position.side === 'long' ? styles.sideBadgeLong : styles.sideBadgeShort,
-                        ]}>
-                          <Text style={[
-                            styles.sideBadgeText,
-                            position.side === 'long' ? styles.sideBadgeTextLong : styles.sideBadgeTextShort,
-                          ]}>
-                            {position.side.toUpperCase()}
-                          </Text>
-                        </View>
-                        {position.human_controlled && (
-                          <Ionicons name="person" size={12} color={colors.info} style={{ marginLeft: 4 }} />
-                        )}
-                      </View>
-                      <Text style={styles.positionShares}>
-                        {position.quantity} shares
-                      </Text>
-                    </View>
-                    <View style={styles.positionRight}>
-                      <Text style={styles.positionPrice}>{formatCurrency(marketValue)}</Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.positionDetails}>
-                    <View style={styles.detailItem}>
-                      <Text style={styles.detailLabel}>Avg Cost</Text>
-                      <Text style={styles.detailValue}>{formatCurrency(position.avg_entry_price)}</Text>
-                    </View>
-                    <View style={styles.detailItem}>
-                      <Text style={styles.detailLabel}>Entry</Text>
-                      <Text style={styles.detailValue}>
-                        {new Date(position.entry_date).toLocaleDateString()}
-                      </Text>
-                    </View>
-                  </View>
-                </Surface>
-              );
-            })
+            positions.map((position, index) => (
+              <AnimatedPositionCard
+                key={position.id}
+                position={position}
+                index={index}
+                formatCurrency={formatCurrency}
+              />
+            ))
           )}
         </View>
 
@@ -241,41 +449,13 @@ export default function TradingScreen() {
               <Text style={styles.emptyCardText}>No trades yet</Text>
             </Surface>
           ) : (
-            trades.slice(0, 20).map((trade) => (
-              <Surface key={trade.id} style={styles.tradeCard}>
-                <View style={styles.tradeHeader}>
-                  <View style={styles.tradeLeft}>
-                    <View style={[
-                      styles.tradeTypeBadge,
-                      (trade.trade_type === 'buy' || trade.trade_type === 'cover')
-                        ? styles.tradeTypeBuy
-                        : styles.tradeTypeSell,
-                    ]}>
-                      <Text style={styles.tradeTypeText}>
-                        {trade.trade_type.toUpperCase()}
-                      </Text>
-                    </View>
-                    <Text style={styles.tradeTicker}>{trade.ticker}</Text>
-                    {trade.is_manual && (
-                      <Ionicons name="person" size={10} color={colors.info} style={{ marginLeft: 4 }} />
-                    )}
-                  </View>
-                  <View style={styles.tradeRight}>
-                    <Text style={styles.tradeValue}>{formatCurrency(trade.value)}</Text>
-                    <Text style={styles.tradeQty}>
-                      {trade.quantity} @ {formatCurrency(trade.price)}
-                    </Text>
-                  </View>
-                </View>
-                {trade.reasoning ? (
-                  <Text style={styles.tradeReasoning} numberOfLines={2}>
-                    {trade.reasoning}
-                  </Text>
-                ) : null}
-                <Text style={styles.tradeTime}>
-                  {new Date(trade.executed_at).toLocaleString()}
-                </Text>
-              </Surface>
+            trades.slice(0, 20).map((trade, index) => (
+              <AnimatedTradeCard
+                key={trade.id}
+                trade={trade}
+                index={index}
+                formatCurrency={formatCurrency}
+              />
             ))
           )}
         </View>
@@ -292,6 +472,10 @@ export default function TradingScreen() {
     </SafeAreaView>
   );
 }
+
+// ============================================================================
+// STYLES
+// ============================================================================
 
 const styles = StyleSheet.create({
   container: {
@@ -320,6 +504,20 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     marginTop: 2,
   },
+  // Portfolio hero - Glass
+  portfolioCardWrapper: {
+    marginHorizontal: spacing.md,
+    marginTop: spacing.md,
+    borderRadius: borderRadius.xl,
+    overflow: 'hidden',
+  },
+  portfolioCardGlass: {
+    borderRadius: borderRadius.xl,
+    padding: spacing.lg,
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  // Portfolio hero - Fallback
   portfolioCard: {
     marginHorizontal: spacing.md,
     marginTop: spacing.md,
@@ -329,6 +527,7 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: fontSize.sm,
     textTransform: 'uppercase',
+    letterSpacing: 1,
   },
   portfolioValue: {
     color: colors.text,
@@ -342,17 +541,17 @@ const styles = StyleSheet.create({
     width: '100%',
     marginTop: spacing.sm,
     paddingTop: spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Platform.OS === 'ios' ? colors.ios.separator : colors.border,
   },
   pnlItem: {
     flex: 1,
     alignItems: 'center',
   },
   pnlDivider: {
-    width: 1,
+    width: StyleSheet.hairlineWidth,
     height: 30,
-    backgroundColor: colors.border,
+    backgroundColor: Platform.OS === 'ios' ? colors.ios.separator : colors.border,
   },
   pnlLabel: {
     color: colors.textMuted,
@@ -493,8 +692,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     marginTop: spacing.md,
     paddingTop: spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Platform.OS === 'ios' ? colors.ios.separatorThin : colors.border,
   },
   detailItem: {
     flex: 1,

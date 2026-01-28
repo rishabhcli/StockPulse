@@ -1,5 +1,9 @@
 import { Platform } from 'react-native';
 
+// iOS version detection for Liquid Glass support
+const iosVersion = Platform.OS === 'ios' ? parseInt(Platform.Version as string, 10) : 0;
+export const isIOS26Plus = Platform.OS === 'ios' && iosVersion >= 26;
+
 // ============================================================================
 // CORE COLORS
 // Aligned with the original web app (templates/index.html) CSS variables
@@ -61,10 +65,10 @@ export const colors = {
     glassBorderMedium: 'rgba(255, 255, 255, 0.08)',
     glassBorderDark: 'rgba(255, 255, 255, 0.04)',
 
-    // Glass tints for interactive elements
-    glassTint: 'rgba(34, 197, 94, 0.10)',
-    glassTintActive: 'rgba(34, 197, 94, 0.18)',
-    glassTintHover: 'rgba(255, 255, 255, 0.06)',
+    // Glass tints for interactive elements (neutral - no green tint)
+    glassTint: 'rgba(255, 255, 255, 0.06)',
+    glassTintActive: 'rgba(255, 255, 255, 0.12)',
+    glassTintHover: 'rgba(255, 255, 255, 0.08)',
 
     // Vibrancy overlays
     vibrancyLight: 'rgba(255, 255, 255, 0.08)',

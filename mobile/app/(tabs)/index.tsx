@@ -16,6 +16,7 @@ import { useMarketStore } from '../../stores/useMarketStore';
 import { PennyStock } from '../../lib/types';
 import { colors, spacing, fontSize, fontFamily, borderRadius, animation } from '../../constants/theme';
 import { isLiquidGlassAvailable } from '../../components/ui/Surface';
+import { GlassIconButton } from '../../components/ui/GlassMenuItem';
 import SentimentHeader from '../../components/market/SentimentHeader';
 import MarketStrip from '../../components/market/MarketStrip';
 import StockCard from '../../components/stocks/StockCard';
@@ -189,19 +190,8 @@ function PennyStockCard({ stock, index }: PennyStockCardProps) {
     return colors.strongSell;
   };
 
-  return (
-    <AnimatedPressable
-      onPress={handlePress}
-      onPressIn={handlePressIn}
-      onPressOut={handlePressOut}
-      style={[
-        styles.pennyCard,
-        Platform.OS === 'ios' && styles.pennyCardIOS,
-        Platform.OS === 'android' && styles.pennyCardAndroid,
-        animatedStyle,
-      ]}
-    >
-      {Platform.OS === 'ios' && <View style={styles.miniCardIOSGlow} pointerEvents="none" />}
+  const pennyContent = (
+    <>
       <View style={styles.pennyCardHeader}>
         <Text style={styles.pennyTicker}>{stock.ticker}</Text>
         <View style={[styles.pennyScoreBadge, { backgroundColor: `${getScoreColor(stock.score)}20` }]}>
@@ -225,6 +215,44 @@ function PennyStockCard({ stock, index }: PennyStockCardProps) {
           </Text>
         </View>
       </View>
+    </>
+  );
+
+  // iOS 26+: Use native Liquid Glass
+  if (isLiquidGlassAvailable() && GlassView) {
+    return (
+      <AnimatedPressable
+        onPress={handlePress}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        style={[styles.pennyCardGlassWrapper, animatedStyle]}
+      >
+        <GlassView
+          style={styles.pennyCardGlass}
+          glassEffectStyle="regular"
+          isInteractive
+        >
+          {pennyContent}
+        </GlassView>
+      </AnimatedPressable>
+    );
+  }
+
+  // Fallback: iOS < 26 / Android / Web
+  return (
+    <AnimatedPressable
+      onPress={handlePress}
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
+      style={[
+        styles.pennyCard,
+        Platform.OS === 'ios' && styles.pennyCardIOS,
+        Platform.OS === 'android' && styles.pennyCardAndroid,
+        animatedStyle,
+      ]}
+    >
+      {Platform.OS === 'ios' && <View style={styles.miniCardIOSGlow} pointerEvents="none" />}
+      {pennyContent}
     </AnimatedPressable>
   );
 }
@@ -316,13 +344,11 @@ export default function OverviewScreen() {
               <Text style={styles.title}>StockPulse</Text>
               <Text style={styles.subtitle}>Real-time Investment Analysis</Text>
             </View>
-            <Pressable
+            <GlassIconButton
+              icon="settings-outline"
               onPress={() => router.push('/(tabs)/profile')}
-              hitSlop={8}
-              style={styles.settingsButton}
-            >
-              <Ionicons name="settings-outline" size={22} color={colors.textSecondary} />
-            </Pressable>
+              size={40}
+            />
           </View>
         </View>
 
@@ -341,14 +367,25 @@ export default function OverviewScreen() {
 
         {/* Error Message */}
         {error && (
-          <View style={[
-            styles.errorContainer,
-            Platform.OS === 'ios' && styles.errorContainerIOS,
-            Platform.OS === 'android' && styles.errorContainerAndroid,
-          ]}>
-            <Ionicons name="warning" size={20} color={colors.strongSell} />
-            <Text style={styles.errorText}>{error}</Text>
-          </View>
+          isLiquidGlassAvailable() && GlassView ? (
+            <View style={styles.errorGlassWrapper}>
+              <GlassView style={styles.errorGlass} glassEffectStyle="regular" tintColor="#ef444420">
+                <View style={styles.errorGlassContent}>
+                  <Ionicons name="warning" size={20} color={colors.strongSell} />
+                  <Text style={styles.errorText}>{error}</Text>
+                </View>
+              </GlassView>
+            </View>
+          ) : (
+            <View style={[
+              styles.errorContainer,
+              Platform.OS === 'ios' && styles.errorContainerIOS,
+              Platform.OS === 'android' && styles.errorContainerAndroid,
+            ]}>
+              <Ionicons name="warning" size={20} color={colors.strongSell} />
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          )
         )}
 
         {/* Top Picks */}
@@ -609,7 +646,40 @@ const styles = StyleSheet.create({
   },
 
   // ==========================================================================
-  // ERROR
+  // PENNY STOCK CARD — iOS 26 Glass
+  // ==========================================================================
+  pennyCardGlassWrapper: {
+    width: 150,
+    borderRadius: borderRadius.lg,
+    overflow: 'hidden',
+  },
+  pennyCardGlass: {
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    overflow: 'hidden',
+  },
+
+  // ==========================================================================
+  // ERROR — iOS 26 Glass
+  // ==========================================================================
+  errorGlassWrapper: {
+    margin: spacing.md,
+    borderRadius: borderRadius.md,
+    overflow: 'hidden',
+  },
+  errorGlass: {
+    borderRadius: borderRadius.md,
+    overflow: 'hidden',
+  },
+  errorGlassContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+
+  // ==========================================================================
+  // ERROR — Fallback
   // ==========================================================================
   errorContainer: {
     flexDirection: 'row',

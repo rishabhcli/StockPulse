@@ -238,6 +238,49 @@ export default function RootLayout() {
                 animation: Platform.OS === 'ios' ? 'default' : 'slide_from_right',
               }}
             />
+            {/* Native iOS formSheet with Liquid Glass on iOS 26+ */}
+            <Stack.Screen
+              name="sheets/stock/[ticker]"
+              options={{
+                headerShown: false,
+                presentation: 'formSheet',
+                // CRITICAL: Transparent for iOS 26 Liquid Glass
+                contentStyle: {
+                  backgroundColor: Platform.select({
+                    ios: 'transparent',
+                    android: colors.android.surfaceContainerHigh,
+                    default: colors.surface,
+                  }),
+                },
+                // Sheet detents
+                sheetAllowedDetents: [0.5, 0.75, 1.0],
+                sheetInitialDetentIndex: 1,
+                sheetGrabberVisible: false,
+                sheetCornerRadius: 24,
+                sheetLargestUndimmedDetentIndex: 0,
+                gestureEnabled: true,
+              }}
+            />
+            <Stack.Screen
+              name="sheets/glossary/[term]"
+              options={{
+                headerShown: false,
+                presentation: 'formSheet',
+                contentStyle: {
+                  backgroundColor: Platform.select({
+                    ios: 'transparent',
+                    android: colors.android.surfaceContainerHigh,
+                    default: colors.surface,
+                  }),
+                },
+                sheetAllowedDetents: [0.4, 0.7],
+                sheetInitialDetentIndex: 1,
+                sheetGrabberVisible: false,
+                sheetCornerRadius: 24,
+                sheetLargestUndimmedDetentIndex: 0,
+                gestureEnabled: true,
+              }}
+            />
             </Stack>
           </SheetProvider>
         </PaperProvider>

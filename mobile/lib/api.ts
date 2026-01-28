@@ -150,7 +150,7 @@ export const analyzeStock = async (ticker: string): Promise<StockAnalysis> => {
 };
 
 export const screenStocks = async (
-  filter: 'all' | 'strong_buys' | 'buys' | 'sells' | 'strong_sells' | 'shorts' = 'all',
+  filter: 'all' | 'strong_buys' | 'buys' | 'holds' | 'sells' | 'strong_sells' | 'shorts' = 'all',
   limit: number = 20
 ): Promise<ScreenerResult[]> => {
   const response = await api.get<{ stocks: any[] }>('/api/screen', {

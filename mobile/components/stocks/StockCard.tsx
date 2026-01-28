@@ -12,7 +12,15 @@ import { colors, borderRadius, spacing, fontSize, fontFamily, getScoreColor, ani
 import { ScreenerResult } from '../../lib/types';
 import { formatPrice, formatPercent } from '../../lib/utils';
 import Badge from '../ui/Badge';
+import { isLiquidGlassAvailable } from '../ui/Surface';
 import { useSheetContext } from '../sheets/SheetProvider';
+
+// iOS 26 Liquid Glass
+let GlassView: any = null;
+try {
+  const glassModule = require('expo-glass-effect');
+  GlassView = glassModule.GlassView;
+} catch {}
 
 // ============================================================================
 // TYPES
@@ -88,32 +96,15 @@ export function StockCard({ stock, variant = 'compact', onPress }: StockCardProp
   // ============================================================================
 
   if (variant === 'compact') {
-    return (
-      <AnimatedPressable
-        onPress={handlePress}
-        onPressIn={handlePressIn}
-        onPressOut={handlePressOut}
-        style={[
-          styles.compactCard,
-          Platform.OS === 'ios' && styles.compactCardIOS,
-          Platform.OS === 'android' && styles.compactCardAndroid,
-          animatedStyle,
-        ]}
-      >
-        {/* iOS Inner Glow */}
-        {Platform.OS === 'ios' && <View style={styles.iosInnerGlow} pointerEvents="none" />}
-
+    const compactContent = (
+      <>
         <View style={styles.compactLeft}>
-          {/* Score Indicator */}
           <View style={styles.scoreIndicatorContainer}>
             <View style={[styles.scoreIndicator, { backgroundColor: scoreColor }]}>
               <Text style={styles.scoreText}>{Math.round(stock.investment_score)}</Text>
             </View>
-            {/* Score ring glow */}
             <View style={[styles.scoreRing, { borderColor: scoreColor }]} />
           </View>
-
-          {/* Stock Info */}
           <View style={styles.compactInfo}>
             <Text style={styles.ticker}>{stock.ticker}</Text>
             <Text style={styles.companyName} numberOfLines={1}>
@@ -121,7 +112,6 @@ export function StockCard({ stock, variant = 'compact', onPress }: StockCardProp
             </Text>
           </View>
         </View>
-
         <View style={styles.compactRight}>
           <Text style={styles.price}>{formatPrice(stock.current_price)}</Text>
           <View
@@ -140,6 +130,43 @@ export function StockCard({ stock, variant = 'compact', onPress }: StockCardProp
             </Text>
           </View>
         </View>
+      </>
+    );
+
+    // iOS 26+: Native Liquid Glass
+    if (isLiquidGlassAvailable() && GlassView) {
+      return (
+        <AnimatedPressable
+          onPress={handlePress}
+          onPressIn={handlePressIn}
+          onPressOut={handlePressOut}
+          style={[styles.compactCardGlassWrapper, animatedStyle]}
+        >
+          <GlassView
+            style={styles.compactCardGlass}
+            glassEffectStyle="regular"
+            isInteractive
+          >
+            {compactContent}
+          </GlassView>
+        </AnimatedPressable>
+      );
+    }
+
+    return (
+      <AnimatedPressable
+        onPress={handlePress}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        style={[
+          styles.compactCard,
+          Platform.OS === 'ios' && styles.compactCardIOS,
+          Platform.OS === 'android' && styles.compactCardAndroid,
+          animatedStyle,
+        ]}
+      >
+        {Platform.OS === 'ios' && <View style={styles.iosInnerGlow} pointerEvents="none" />}
+        {compactContent}
       </AnimatedPressable>
     );
   }
@@ -227,6 +254,18 @@ const styles = StyleSheet.create({
   // ============================================================================
   // COMPACT VARIANT BASE
   // ============================================================================
+  compactCardGlassWrapper: {
+    borderRadius: borderRadius.lg,
+    overflow: 'hidden',
+  },
+  compactCardGlass: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    overflow: 'hidden',
+  },
   compactCard: {
     flexDirection: 'row',
     alignItems: 'center',

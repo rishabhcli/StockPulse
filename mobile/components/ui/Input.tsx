@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Platform,
   TextInput,
@@ -14,9 +14,23 @@ import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
+  withSpring,
   interpolateColor,
 } from 'react-native-reanimated';
 import { colors, borderRadius, spacing, fontSize, animation } from '../../constants/theme';
+
+// iOS 26 Liquid Glass
+let GlassView: any = null;
+try {
+  const glassModule = require('expo-glass-effect');
+  GlassView = glassModule.GlassView;
+} catch {}
+
+function isLiquidGlassAvailable(): boolean {
+  if (Platform.OS !== 'ios') return false;
+  const majorVersion = parseInt(Platform.Version as string, 10);
+  return majorVersion >= 26 && GlassView !== null;
+}
 
 // ============================================================================
 // TYPES

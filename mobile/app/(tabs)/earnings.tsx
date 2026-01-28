@@ -5,6 +5,22 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, fontSize, fontFamily, borderRadius } from '../../constants/theme';
 import Surface from '../../components/ui/Surface';
 
+// Earnings date badge uses platform-adapted styling
+const dateBadgeStyle = Platform.select({
+  ios: {
+    backgroundColor: colors.ios.glassRegular,
+    borderWidth: 1,
+    borderColor: colors.ios.glassBorderMedium,
+  },
+  android: {
+    backgroundColor: colors.android.surfaceContainerHigh,
+    elevation: 1,
+  },
+  default: {
+    backgroundColor: colors.surfaceVariant,
+  },
+});
+
 export default function EarningsScreen() {
   // This would typically fetch from an earnings calendar API
   // For now, showing placeholder UI
@@ -137,11 +153,11 @@ const styles = StyleSheet.create({
   earningsDate: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.surfaceVariant,
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
     borderRadius: borderRadius.sm,
     gap: 4,
+    ...dateBadgeStyle,
   },
   dateText: {
     color: colors.textSecondary,

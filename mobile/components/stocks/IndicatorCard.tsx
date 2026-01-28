@@ -13,6 +13,14 @@ import { colors, borderRadius, spacing, fontSize, animation } from '../../consta
 import { useEffect } from 'react';
 import TappableTerm from '../sheets/TappableTerm';
 import { getGlossaryKey } from '../../lib/glossary';
+import { isLiquidGlassAvailable } from '../ui/Surface';
+
+// iOS 26 Liquid Glass
+let GlassView: any = null;
+try {
+  const glassModule = require('expo-glass-effect');
+  GlassView = glassModule.GlassView;
+} catch {}
 
 // ============================================================================
 // TYPES
@@ -88,19 +96,8 @@ export function IndicatorCard({ name, value, signal, description, icon, index = 
 
   const signalColor = getSignalColor();
 
-  return (
-    <Animated.View
-      style={[
-        styles.container,
-        Platform.OS === 'ios' && styles.containerIOS,
-        Platform.OS === 'android' && styles.containerAndroid,
-        animatedStyle,
-      ]}
-    >
-      {/* iOS Inner Glow */}
-      {Platform.OS === 'ios' && <View style={styles.iosInnerGlow} pointerEvents="none" />}
-
-      {/* Header */}
+  const cardContent = (
+    <>
       <View style={styles.header}>
         {getGlossaryKey(name) ? (
           <TappableTerm displayName={name} style={styles.name} />
@@ -113,24 +110,43 @@ export function IndicatorCard({ name, value, signal, description, icon, index = 
           <Ionicons name={getSignalIcon()} size={12} color={signalColor} />
         </View>
       </View>
-
-      {/* Value */}
       <Text style={[styles.value, { color: signalColor }]}>
         {typeof value === 'number' ? value.toFixed(2) : value}
       </Text>
-
-      {/* Signal Label */}
       <View style={styles.signalLabelContainer}>
         <View style={[styles.signalDot, { backgroundColor: signalColor }]} />
         <Text style={[styles.signalLabel, { color: signalColor }]}>{getSignalLabel()}</Text>
       </View>
-
-      {/* Description */}
       {description && (
         <Text style={styles.description} numberOfLines={2}>
           {description}
         </Text>
       )}
+    </>
+  );
+
+  // iOS 26+: Native Liquid Glass
+  if (isLiquidGlassAvailable() && GlassView) {
+    return (
+      <Animated.View style={[styles.glassWrapper, animatedStyle]}>
+        <GlassView style={styles.glassContainer} glassEffectStyle="clear">
+          {cardContent}
+        </GlassView>
+      </Animated.View>
+    );
+  }
+
+  return (
+    <Animated.View
+      style={[
+        styles.container,
+        Platform.OS === 'ios' && styles.containerIOS,
+        Platform.OS === 'android' && styles.containerAndroid,
+        animatedStyle,
+      ]}
+    >
+      {Platform.OS === 'ios' && <View style={styles.iosInnerGlow} pointerEvents="none" />}
+      {cardContent}
     </Animated.View>
   );
 }
@@ -159,6 +175,15 @@ const styles = StyleSheet.create({
   // ============================================================================
   // CONTAINER
   // ============================================================================
+  glassWrapper: {
+    borderRadius: borderRadius.lg,
+    overflow: 'hidden',
+  },
+  glassContainer: {
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    overflow: 'hidden',
+  },
   container: {
     backgroundColor: colors.surface,
     borderRadius: borderRadius.lg,

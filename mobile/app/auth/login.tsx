@@ -3,7 +3,16 @@ import { View, StyleSheet, KeyboardAvoidingView, Platform, ScrollView } from 're
 import { Text, TextInput, Button, HelperText } from 'react-native-paper';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '../../stores/useAuthStore';
-import { colors, fontFamily } from '../../constants/theme';
+import { isSupabaseEnabled } from '../../lib/supabase';
+import { colors, fontFamily, borderRadius, spacing } from '../../constants/theme';
+import { isLiquidGlassAvailable } from '../../components/ui/Surface';
+
+// iOS 26 Liquid Glass
+let GlassView: any = null;
+try {
+  const glassModule = require('expo-glass-effect');
+  GlassView = glassModule.GlassView;
+} catch {}
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -34,6 +43,18 @@ export default function LoginScreen() {
     setLoading(false);
   };
 
+  const handleDemoLogin = async () => {
+    setLoading(true);
+    setError('');
+    const { error: authError } = await signIn('demo@stockpulse.app', 'demo');
+    if (authError) {
+      setError(authError.message || 'Demo login failed');
+    } else {
+      router.replace('/(tabs)');
+    }
+    setLoading(false);
+  };
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -45,58 +66,143 @@ export default function LoginScreen() {
           <Text variant="bodyLarge" style={styles.subtitle}>Sign in to your account</Text>
         </View>
 
-        <View style={styles.form}>
-          <TextInput
-            label="Email"
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            mode="outlined"
-            style={styles.input}
-            outlineColor={colors.border}
-            activeOutlineColor={colors.primary}
-            textColor={colors.text}
-          />
+        {isLiquidGlassAvailable() && GlassView ? (
+          <View style={styles.formGlassWrapper}>
+            <GlassView style={styles.formGlass} glassEffectStyle="regular">
+              <View style={styles.formInner}>
+                <TextInput
+                  label="Email"
+                  value={email}
+                  onChangeText={setEmail}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  mode="outlined"
+                  style={styles.input}
+                  outlineColor={colors.ios.glassBorderMedium}
+                  activeOutlineColor={colors.primary}
+                  textColor={colors.text}
+                />
 
-          <TextInput
-            label="Password"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            mode="outlined"
-            style={styles.input}
-            outlineColor={colors.border}
-            activeOutlineColor={colors.primary}
-            textColor={colors.text}
-          />
+                <TextInput
+                  label="Password"
+                  value={password}
+                  onChangeText={setPassword}
+                  secureTextEntry
+                  mode="outlined"
+                  style={styles.input}
+                  outlineColor={colors.ios.glassBorderMedium}
+                  activeOutlineColor={colors.primary}
+                  textColor={colors.text}
+                />
 
-          {error ? (
-            <HelperText type="error" visible={!!error}>
-              {error}
-            </HelperText>
-          ) : null}
+                {error ? (
+                  <HelperText type="error" visible={!!error}>
+                    {error}
+                  </HelperText>
+                ) : null}
 
-          <Button
-            mode="contained"
-            onPress={handleLogin}
-            loading={loading}
-            disabled={loading}
-            style={styles.button}
-            buttonColor={colors.primary}
-          >
-            Sign In
-          </Button>
+                <Button
+                  mode="contained"
+                  onPress={handleLogin}
+                  loading={loading}
+                  disabled={loading}
+                  style={styles.button}
+                  buttonColor={colors.primary}
+                >
+                  Sign In
+                </Button>
 
-          <Button
-            mode="text"
-            onPress={() => router.push('/auth/signup')}
-            style={styles.linkButton}
-            textColor={colors.primary}
-          >
-            Don't have an account? Sign Up
-          </Button>
-        </View>
+                <Button
+                  mode="text"
+                  onPress={() => router.push('/auth/signup')}
+                  style={styles.linkButton}
+                  textColor={colors.primary}
+                >
+                  Don't have an account? Sign Up
+                </Button>
+
+                {!isSupabaseEnabled && (
+                  <Button
+                    mode="outlined"
+                    onPress={handleDemoLogin}
+                    loading={loading}
+                    disabled={loading}
+                    style={styles.demoButton}
+                    textColor={colors.textSecondary}
+                  >
+                    Demo Login
+                  </Button>
+                )}
+              </View>
+            </GlassView>
+          </View>
+        ) : (
+          <View style={styles.form}>
+            <TextInput
+              label="Email"
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              mode="outlined"
+              style={styles.input}
+              outlineColor={colors.border}
+              activeOutlineColor={colors.primary}
+              textColor={colors.text}
+            />
+
+            <TextInput
+              label="Password"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+              mode="outlined"
+              style={styles.input}
+              outlineColor={colors.border}
+              activeOutlineColor={colors.primary}
+              textColor={colors.text}
+            />
+
+            {error ? (
+              <HelperText type="error" visible={!!error}>
+                {error}
+              </HelperText>
+            ) : null}
+
+            <Button
+              mode="contained"
+              onPress={handleLogin}
+              loading={loading}
+              disabled={loading}
+              style={styles.button}
+              buttonColor={colors.primary}
+            >
+              Sign In
+            </Button>
+
+            <Button
+              mode="text"
+              onPress={() => router.push('/auth/signup')}
+              style={styles.linkButton}
+              textColor={colors.primary}
+            >
+              Don't have an account? Sign Up
+            </Button>
+
+            {!isSupabaseEnabled && (
+              <Button
+                mode="outlined"
+                onPress={handleDemoLogin}
+                loading={loading}
+                disabled={loading}
+                style={styles.demoButton}
+                textColor={colors.textSecondary}
+              >
+                Demo Login
+              </Button>
+            )}
+          </View>
+        )}
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -124,6 +230,20 @@ const styles = StyleSheet.create({
   subtitle: {
     color: colors.textSecondary,
   },
+  formGlassWrapper: {
+    width: '100%',
+    maxWidth: 400,
+    alignSelf: 'center',
+    borderRadius: borderRadius['2xl'],
+    overflow: 'hidden',
+  },
+  formGlass: {
+    borderRadius: borderRadius['2xl'],
+    overflow: 'hidden',
+  },
+  formInner: {
+    padding: spacing.lg,
+  },
   form: {
     width: '100%',
     maxWidth: 400,
@@ -139,5 +259,9 @@ const styles = StyleSheet.create({
   },
   linkButton: {
     marginTop: 16,
+  },
+  demoButton: {
+    marginTop: 12,
+    borderColor: colors.border,
   },
 });
