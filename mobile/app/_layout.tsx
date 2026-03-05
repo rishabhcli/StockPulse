@@ -6,6 +6,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { PaperProvider, MD3DarkTheme } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useFonts } from 'expo-font';
+import { ErrorBoundary } from '../components/ErrorBoundary';
 import {
   DMSans_400Regular,
   DMSans_500Medium,
@@ -202,6 +203,7 @@ export default function RootLayout() {
   }
 
   return (
+    <ErrorBoundary>
     <GestureHandlerRootView style={layoutStyles.root}>
       <SafeAreaProvider>
         <PaperProvider theme={paperTheme}>
@@ -286,6 +288,7 @@ export default function RootLayout() {
         </PaperProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
+    </ErrorBoundary>
   );
 }
 

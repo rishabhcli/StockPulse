@@ -23,6 +23,7 @@ except ImportError:
 
 # Supabase database service
 from lib.db_service import db_service
+from lib.exceptions import StockPulseError, ValidationError
 
 # ============== FEATURE FLAGS ==============
 # v2 layered scoring is now the default
@@ -34,47 +35,59 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__, static_folder='static', static_url_path='')
 
+# ============== REQUEST METRICS ==============
+from lib.metrics import setup_metrics
+setup_metrics(app)
+
+# ============== RATE LIMITING ==============
+try:
+    from flask_limiter import Limiter
+    from flask_limiter.util import get_remote_address
+    limiter = Limiter(
+        get_remote_address,
+        app=app,
+        default_limits=["60 per minute"],
+        storage_uri=os.environ.get('REDIS_URL', 'memory://'),
+    )
+except ImportError:
+    # flask-limiter not installed; create a no-op decorator
+    logger.warning("flask-limiter not installed — rate limiting disabled")
+    class _NoOpLimiter:
+        def limit(self, *a, **kw):
+            def decorator(f):
+                return f
+            return decorator
+        def exempt(self, f):
+            return f
+    limiter = _NoOpLimiter()
+
+
+# ============== INPUT VALIDATION ==============
+_TICKER_PATTERN = re.compile(r'^[A-Z\^\.]{1,10}$')
+
+
+def validate_ticker(ticker_raw):
+    """Validate and normalize a ticker symbol. Returns normalized ticker or None."""
+    if not ticker_raw:
+        return None
+    cleaned = ticker_raw.strip().upper()
+    if not _TICKER_PATTERN.match(cleaned):
+        return None
+    return cleaned
+
+
+def safe_int(value, default, min_val=1, max_val=100):
+    """Safely parse an integer with bounds clamping."""
+    try:
+        return min(max(int(value), min_val), max_val)
+    except (ValueError, TypeError):
+        return default
+
 
 # ============== CACHING SYSTEM ==============
-# Simple thread-safe cache with TTL to avoid Yahoo Finance rate limits
-
-class TickerCache:
-    """Thread-safe cache for Yahoo Finance data with TTL"""
-
-    def __init__(self, default_ttl=300):  # 5 minutes default
-        self._cache = {}
-        self._lock = threading.Lock()
-        self.default_ttl = default_ttl
-
-    def _is_expired(self, entry):
-        return time.time() > entry['expires']
-
-    def get(self, key):
-        with self._lock:
-            if key in self._cache:
-                entry = self._cache[key]
-                if not self._is_expired(entry):
-                    return entry['data']
-                else:
-                    del self._cache[key]
-        return None
-
-    def set(self, key, data, ttl=None):
-        if ttl is None:
-            ttl = self.default_ttl
-        with self._lock:
-            self._cache[key] = {
-                'data': data,
-                'expires': time.time() + ttl
-            }
-
-    def clear(self):
-        with self._lock:
-            self._cache.clear()
-
-
-# Global cache instance - 1 hour default TTL to avoid rate limiting
-_ticker_cache = TickerCache(default_ttl=3600)
+# Use the canonical cache from data/cache.py (thread-safe, with stats tracking)
+from data.cache import get_ticker_cache
+_ticker_cache = get_ticker_cache()
 
 
 def get_cached_ticker(symbol):
@@ -213,7 +226,7 @@ def get_stooq_quote(symbol):
                 'change': round(change, 2),
                 'change_pct': round(change_pct, 2)
             }
-    except:
+    except Exception:
         pass
 
     return None
@@ -310,7 +323,7 @@ def get_cached_calendar(symbol):
         calendar = ticker.calendar
         _ticker_cache.set(cache_key, calendar, ttl=1800)  # 30 min cache for calendar
         return calendar
-    except:
+    except Exception:
         _ticker_cache.set(cache_key, None, ttl=1800)  # Cache failures too
         return None
 
@@ -341,9 +354,15 @@ def normalize_ticker(ticker):
 
 # ============== END INDEX SYMBOL NORMALIZATION ==============
 
-_ALLOWED_ORIGINS = os.environ.get(
-    'CORS_ORIGINS', 'http://localhost:8080,http://localhost:8081,http://localhost:19006'
-).split(',')
+_is_production = os.environ.get('FLASK_ENV', '').lower() == 'production'
+_cors_env = os.environ.get('CORS_ORIGINS', '')
+if _is_production and not _cors_env:
+    logger.critical("CORS_ORIGINS not set in production — using restrictive default")
+_ALLOWED_ORIGINS = _cors_env.split(',') if _cors_env else [
+    'http://localhost:8080', 'http://localhost:8081', 'http://localhost:19006'
+]
+# Reject wildcard origins
+_ALLOWED_ORIGINS = [o.strip() for o in _ALLOWED_ORIGINS if o.strip() != '*']
 CORS(app, origins=_ALLOWED_ORIGINS, supports_credentials=True)
 
 # ElevenLabs Configuration
@@ -428,7 +447,7 @@ class TradingSimulator:
             spy_hist = spy.history(period='1d')
             if not spy_hist.empty:
                 self.spy_start_price = spy_hist['Close'].iloc[-1]
-        except:
+        except Exception:
             self.spy_start_price = 500.0  # Fallback
 
         self.portfolio_history.append({
@@ -445,7 +464,7 @@ class TradingSimulator:
             hist = get_cached_history(ticker, period='1d')
             if not hist.empty:
                 return hist['Close'].iloc[-1]
-        except:
+        except Exception:
             pass
         return None
 
@@ -629,7 +648,7 @@ class TradingSimulator:
             spy_hist = get_cached_history('SPY', period='1d')
             if not spy_hist.empty:
                 spy_price = spy_hist['Close'].iloc[-1]
-        except:
+        except Exception:
             pass
 
         self.portfolio_history.append({
@@ -667,7 +686,7 @@ class TradingSimulator:
                 current_spy_price = spy_hist['Close'].iloc[-1]
                 if self.spy_start_price:
                     spy_return = ((current_spy_price - self.spy_start_price) / self.spy_start_price) * 100
-        except:
+        except Exception:
             pass
 
         alpha = total_return - spy_return
@@ -1040,7 +1059,7 @@ class NewsAnalyzer:
                         if publish_time:
                             try:
                                 published_str = datetime.fromtimestamp(publish_time).strftime('%Y-%m-%d %H:%M')
-                            except:
+                            except Exception:
                                 published_str = 'Recent'
                         else:
                             published_str = 'Recent'
@@ -1420,7 +1439,7 @@ def get_vix():
         vix_data = get_cached_history("^VIX", period="5d")
         if not vix_data.empty:
             return vix_data['Close'].iloc[-1]
-    except:
+    except Exception:
         pass
     return 20
 
@@ -1447,7 +1466,7 @@ def get_market_sentiment():
                 sentiment['vix_signal'] = 'HIGH FEAR - Significant market stress'
             else:
                 sentiment['vix_signal'] = 'EXTREME FEAR - Panic selling, potential buying opportunity'
-    except:
+    except Exception:
         sentiment['vix'] = 20
         sentiment['vix_change'] = 0
         sentiment['vix_signal'] = 'NORMAL'
@@ -1456,7 +1475,7 @@ def get_market_sentiment():
         tny_data = get_cached_history("^TNX", period="5d")
         if not tny_data.empty:
             sentiment['treasury_10y'] = round(tny_data['Close'].iloc[-1], 2)
-    except:
+    except Exception:
         sentiment['treasury_10y'] = 4.0
 
     try:
@@ -1466,7 +1485,7 @@ def get_market_sentiment():
                 (spy_data['Close'].iloc[-1] / spy_data['Close'].iloc[0] - 1) * 100, 2
             )
             sentiment['sp500_current'] = round(spy_data['Close'].iloc[-1], 2)
-    except:
+    except Exception:
         sentiment['sp500_monthly_change'] = 0
 
     # Fear & Greed approximation based on VIX and market momentum
@@ -1486,7 +1505,7 @@ def get_market_sentiment():
             sentiment['fear_greed_signal'] = 'GREED'
         else:
             sentiment['fear_greed_signal'] = 'EXTREME GREED'
-    except:
+    except Exception:
         sentiment['fear_greed_index'] = 50
         sentiment['fear_greed_signal'] = 'NEUTRAL'
 
@@ -1518,7 +1537,7 @@ def get_consumer_sentiment():
                 consumer_data['consumer_signal'] = 'WEAK - Consumer caution'
             else:
                 consumer_data['consumer_signal'] = 'NEGATIVE - Consumer pullback'
-    except:
+    except Exception:
         consumer_data['consumer_signal'] = 'NEUTRAL'
 
     return consumer_data
@@ -1538,7 +1557,7 @@ def get_daily_movers():
                     'price': round(curr_close, 2),
                     'change_pct': round(pct_change, 2)
                 }
-        except:
+        except Exception:
             pass
         return None
 
@@ -1659,7 +1678,7 @@ def get_earnings_calendar():
                             earnings_dt = datetime.strptime(ed[:10], '%Y-%m-%d')
                         elif isinstance(ed, datetime):
                             earnings_dt = ed
-            except:
+            except Exception:
                 pass
 
             # Method 2: Check info for earnings timestamps (fallback, uses cached info)
@@ -1671,7 +1690,7 @@ def get_earnings_calendar():
                     elif info.get('earningsTimestampStart'):
                         ts = info['earningsTimestampStart']
                         earnings_dt = datetime.fromtimestamp(ts)
-                except:
+                except Exception:
                     pass
 
             if earnings_dt is None:
@@ -1702,7 +1721,7 @@ def get_earnings_calendar():
                         score = 30
                     else:
                         score = int(50 + (50 - rsi_val))
-            except:
+            except Exception:
                 pass
 
             # Get market cap for display
@@ -1747,11 +1766,11 @@ def get_earnings_calendar():
                         result['prediction'] = 'LIKELY BEAT'
                     elif result['prev_surprise_pct'] < 0:
                         result['prediction'] = 'LIKELY MISS'
-            except:
+            except Exception:
                 pass
 
             return result
-        except:
+        except Exception:
             pass
         return None
 
@@ -1872,7 +1891,7 @@ def get_penny_stocks():
                 'volatility': volatility,
                 'volume': int(avg_volume) if avg_volume else 0
             }
-        except:
+        except Exception:
             pass
         return None
 
@@ -2017,7 +2036,7 @@ def get_earnings_data(ticker):
             if calendar is not None and not calendar.empty:
                 if 'Earnings Date' in calendar.index:
                     earnings_data['earnings_date'] = str(calendar.loc['Earnings Date'].iloc[0])
-        except:
+        except Exception:
             pass
 
         try:
@@ -2038,7 +2057,7 @@ def get_earnings_data(ticker):
                     surprises = [e.get('surprise', 0) for e in real_history if e.get('surprise')]
                     if surprises:
                         earnings_data['earnings_surprise_avg'] = round(np.mean(surprises), 2)
-        except:
+        except Exception:
             pass
 
         try:
@@ -2050,7 +2069,7 @@ def get_earnings_data(ticker):
                 'target_median': info.get('targetMedianPrice', 0) or 0,
                 'num_analysts': info.get('numberOfAnalystOpinions', 0) or 0
             }
-        except:
+        except Exception:
             pass
 
     except Exception as e:
@@ -3065,7 +3084,7 @@ def screen_stocks(filter_type='all', limit=20, tickers=None):
                     'rsi': result['indicators'].get('RSI', 0),
                     'confidence': result['confidence']
                 }
-        except:
+        except Exception:
             pass
         return None
 
@@ -3327,13 +3346,15 @@ def service_worker():
     return send_from_directory('static', 'sw.js', mimetype='application/javascript')
 
 @app.route('/api/analyze', methods=['POST'])
+@limiter.limit("10 per minute")
 def analyze():
-    data = request.json
-    ticker = data.get('ticker', '').strip()
+    data = request.json or {}
+    ticker_raw = data.get('ticker', '')
     scoring_version = data.get('scoring', request.args.get('scoring', 'auto'))
 
+    ticker = validate_ticker(ticker_raw)
     if not ticker:
-        return jsonify({"error": "Please enter a ticker symbol"})
+        return jsonify({"error": "Invalid or missing ticker symbol"}), 400
 
     # Normalize ticker to handle index symbols (add ^ prefix if needed)
     ticker = normalize_ticker(ticker)
@@ -3351,9 +3372,10 @@ def analyze():
     return jsonify(result)
 
 @app.route('/api/screen', methods=['GET'])
+@limiter.limit("5 per minute")
 def screen():
     filter_type = request.args.get('filter', 'all')
-    limit = int(request.args.get('limit', 20))
+    limit = safe_int(request.args.get('limit', 20), default=20, min_val=1, max_val=100)
 
     results = screen_stocks(filter_type, limit)
     return jsonify({
@@ -3380,11 +3402,11 @@ def reddit_sentiment():
         Reddit sentiment analysis including mention counts, sentiment scores,
         and top posts from r/wallstreetbets, r/stocks, etc.
     """
-    ticker = request.args.get('ticker', '').strip().upper()
+    ticker = validate_ticker(request.args.get('ticker', ''))
     time_filter = request.args.get('time', 'week')
 
     if not ticker:
-        return jsonify({"error": "Please provide a ticker parameter"}), 400
+        return jsonify({"error": "Invalid or missing ticker parameter"}), 400
 
     if time_filter not in ['day', 'week', 'month']:
         time_filter = 'week'
@@ -3403,11 +3425,11 @@ def reddit_sentiment():
 @app.route('/api/insider-trading', methods=['GET'])
 def get_insider_trading_api():
     """Get insider trading data for a ticker from SEC EDGAR / yfinance"""
-    ticker = request.args.get('ticker', '').strip().upper()
-    days = request.args.get('days', 90, type=int)
+    ticker = validate_ticker(request.args.get('ticker', ''))
+    days = safe_int(request.args.get('days', 90), default=90, min_val=1, max_val=365)
 
     if not ticker:
-        return jsonify({"error": "Please provide a ticker parameter"}), 400
+        return jsonify({"error": "Invalid or missing ticker parameter"}), 400
 
     try:
         from data.insider_trading import get_insider_trading
@@ -3423,10 +3445,10 @@ def get_insider_trading_api():
 @app.route('/api/short-interest', methods=['GET'])
 def get_short_interest_api():
     """Get short interest data for a ticker"""
-    ticker = request.args.get('ticker', '').strip().upper()
+    ticker = validate_ticker(request.args.get('ticker', ''))
 
     if not ticker:
-        return jsonify({"error": "Please provide a ticker parameter"}), 400
+        return jsonify({"error": "Invalid or missing ticker parameter"}), 400
 
     try:
         from data.short_interest import get_short_interest
@@ -3442,10 +3464,10 @@ def get_short_interest_api():
 @app.route('/api/relative-strength', methods=['GET'])
 def get_relative_strength_api():
     """Get relative strength vs sector for a ticker"""
-    ticker = request.args.get('ticker', '').strip().upper()
+    ticker = validate_ticker(request.args.get('ticker', ''))
 
     if not ticker:
-        return jsonify({"error": "Please provide a ticker parameter"}), 400
+        return jsonify({"error": "Invalid or missing ticker parameter"}), 400
 
     try:
         from data.relative_strength import get_relative_strength
@@ -3454,7 +3476,7 @@ def get_relative_strength_api():
         try:
             t = yf.Ticker(ticker)
             info = t.info or {}
-        except:
+        except Exception:
             pass
 
         result = get_relative_strength(ticker, info=info)
@@ -3522,6 +3544,7 @@ def record_score_api():
 
 
 @app.route('/api/speak', methods=['POST'])
+@limiter.limit("5 per minute")
 def speak():
     """Generate speech using ElevenLabs API"""
     if not ELEVENLABS_API_KEY:
@@ -3578,7 +3601,7 @@ def get_quick_stock_data(symbols):
                     'price': quote['price'],
                     'score': 50 + int(quote['change_pct'] * 5)
                 })
-        except:
+        except Exception:
             pass
     return results
 
@@ -3607,7 +3630,7 @@ def get_fast_market_sentiment():
             sentiment['vix'] = 18
             sentiment['vix_change'] = 0
             sentiment['vix_signal'] = 'NORMAL'
-    except:
+    except Exception:
         sentiment['vix'] = 18
         sentiment['vix_change'] = 0
         sentiment['vix_signal'] = 'NORMAL'
@@ -3619,7 +3642,7 @@ def get_fast_market_sentiment():
             sentiment['treasury_10y'] = tnx_quote['price']
         else:
             sentiment['treasury_10y'] = 4.5
-    except:
+    except Exception:
         sentiment['treasury_10y'] = 4.5
 
     # Calculate Fear & Greed based on VIX
@@ -3639,7 +3662,7 @@ def get_fast_market_sentiment():
             sentiment['fear_greed_signal'] = 'GREED'
         else:
             sentiment['fear_greed_signal'] = 'EXTREME GREED'
-    except:
+    except Exception:
         sentiment['fear_greed_index'] = 50
         sentiment['fear_greed_signal'] = 'NEUTRAL'
 
@@ -4023,6 +4046,7 @@ def stock_page(ticker):
     return render_template('stock.html', ticker=ticker_normalized)
 
 @app.route('/api/cache/clear', methods=['POST'])
+@limiter.limit("2 per minute")
 def clear_cache_endpoint():
     """Clear all cached data to force fresh API calls"""
     clear_cache()
@@ -4033,6 +4057,8 @@ def clear_cache_endpoint():
 
 # Supabase JWT secret for signature verification
 _SUPABASE_JWT_SECRET = os.environ.get('SUPABASE_JWT_SECRET', '')
+if not _SUPABASE_JWT_SECRET:
+    logger.critical("SUPABASE_JWT_SECRET not set — authenticated endpoints will reject all requests")
 
 
 def get_user_id_from_request():
@@ -4043,18 +4069,15 @@ def get_user_id_from_request():
     token = auth_header[7:]
     try:
         import jwt as pyjwt
-        if _SUPABASE_JWT_SECRET:
-            payload = pyjwt.decode(
-                token,
-                _SUPABASE_JWT_SECRET,
-                algorithms=["HS256"],
-                audience="authenticated",
-            )
-        else:
-            # Fallback: decode without verification if secret not configured
-            # Log a warning so operators know to set SUPABASE_JWT_SECRET
-            logger.warning("SUPABASE_JWT_SECRET not set — JWT signature not verified")
-            payload = pyjwt.decode(token, options={"verify_signature": False})
+        if not _SUPABASE_JWT_SECRET:
+            logger.error("SUPABASE_JWT_SECRET not configured — cannot verify JWT")
+            return None
+        payload = pyjwt.decode(
+            token,
+            _SUPABASE_JWT_SECRET,
+            algorithms=["HS256"],
+            audience="authenticated",
+        )
         return payload.get('sub')
     except Exception:
         return None
@@ -4135,6 +4158,7 @@ def trading_sim_trades():
 
 
 @app.route('/api/trading-sim/execute', methods=['POST'])
+@limiter.limit("20 per minute")
 @require_auth
 def trading_sim_execute():
     """Execute AI trading decision cycle - analyzes market and makes trades"""
@@ -4168,6 +4192,7 @@ def trading_sim_reset():
 
 
 @app.route('/api/trading-sim/manual-trade', methods=['POST'])
+@limiter.limit("20 per minute")
 @require_auth
 def trading_sim_manual_trade():
     """Execute a manual (human-initiated) trade that overrides AI control"""
@@ -4284,12 +4309,22 @@ def set_security_headers(response):
     response.headers['X-Frame-Options'] = 'DENY'
     response.headers['X-XSS-Protection'] = '1; mode=block'
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: https:; "
+        "connect-src 'self' https://*.supabase.co; "
+        "frame-ancestors 'none'"
+    )
+    response.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=()'
     if os.environ.get('ENABLE_HSTS', '').lower() == 'true':
         response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
     return response
 
 
 @app.route('/health')
+@limiter.exempt
 def health():
     return jsonify({
         "status": "healthy",
@@ -4297,8 +4332,36 @@ def health():
         "supabase_enabled": db_service.enabled,
     })
 
+
+@app.route('/health/cache')
+@limiter.exempt
+def cache_health():
+    """Return cache statistics for monitoring."""
+    return jsonify(_ticker_cache.get_stats())
+
+
+# ============== GLOBAL ERROR HANDLERS ==============
+
+@app.errorhandler(StockPulseError)
+def handle_stockpulse_error(e):
+    return jsonify({"error": e.message, "type": e.__class__.__name__}), e.status_code
+
+
+@app.errorhandler(429)
+def handle_rate_limit(e):
+    return jsonify({"error": "Rate limit exceeded. Please try again later."}), 429
+
+
+@app.errorhandler(500)
+def handle_500(e):
+    logger.exception("Internal server error")
+    return jsonify({"error": "Internal server error"}), 500
+
+
 @app.errorhandler(404)
 def not_found(e):
+    if request.path.startswith('/api/'):
+        return jsonify({"error": "Endpoint not found"}), 404
     return send_from_directory(app.static_folder, 'index.html')
 
 if __name__ == '__main__':
