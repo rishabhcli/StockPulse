@@ -16,6 +16,7 @@ Storage: SQLite (lightweight, no setup required)
 import sqlite3
 import logging
 import os
+import json
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime, timedelta
@@ -36,6 +37,13 @@ class ScoreRecord:
     recommendation: str  # STRONG_BUY, BUY, HOLD, SELL, STRONG_SELL
     price_at_scoring: float
     timestamp: datetime
+    scoring_version: str = 'v3'
+    instrument_type: str = 'equity'
+    benchmark_ticker: str = 'SPY'
+    forward_horizons: List[int] = field(default_factory=lambda: [5, 20, 60])
+    transaction_cost_bps: float = 10.0
+    slippage_bps: float = 5.0
+    metadata: Dict[str, Any] = field(default_factory=dict)
     id: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -46,6 +54,13 @@ class ScoreRecord:
             'recommendation': self.recommendation,
             'price_at_scoring': round(self.price_at_scoring, 2),
             'timestamp': self.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
+            'scoring_version': self.scoring_version,
+            'instrument_type': self.instrument_type,
+            'benchmark_ticker': self.benchmark_ticker,
+            'forward_horizons': self.forward_horizons,
+            'transaction_cost_bps': self.transaction_cost_bps,
+            'slippage_bps': self.slippage_bps,
+            'metadata': self.metadata,
         }
 
 
@@ -58,6 +73,15 @@ class ValidationResult:
     price_at_scoring: float
     price_current: float
     return_pct: float
+    horizon_days: int
+    instrument_type: str = 'equity'
+    benchmark_ticker: str = 'SPY'
+    benchmark_return_pct: float = 0.0
+    excess_return_pct: float = 0.0
+    net_return_pct: float = 0.0
+    transaction_cost_bps: float = 10.0
+    slippage_bps: float = 5.0
+    scoring_version: str = 'v3'
     days_held: int
     correct: bool  # Direction correct?
     timestamp: datetime
@@ -70,6 +94,15 @@ class ValidationResult:
             'price_at_scoring': round(self.price_at_scoring, 2),
             'price_current': round(self.price_current, 2),
             'return_pct': round(self.return_pct, 2),
+            'horizon_days': self.horizon_days,
+            'instrument_type': self.instrument_type,
+            'benchmark_ticker': self.benchmark_ticker,
+            'benchmark_return_pct': round(self.benchmark_return_pct, 2),
+            'excess_return_pct': round(self.excess_return_pct, 2),
+            'net_return_pct': round(self.net_return_pct, 2),
+            'transaction_cost_bps': self.transaction_cost_bps,
+            'slippage_bps': self.slippage_bps,
+            'scoring_version': self.scoring_version,
             'days_held': self.days_held,
             'correct': self.correct,
             'timestamp': self.timestamp.strftime('%Y-%m-%d'),
@@ -96,6 +129,8 @@ class BacktestResult:
     sharpe_ratio: Optional[float] = None
     max_drawdown: Optional[float] = None
     win_rate_by_recommendation: Dict[str, float] = field(default_factory=dict)
+    forward_horizons: List[int] = field(default_factory=list)
+    by_horizon: Dict[str, Dict[str, float]] = field(default_factory=dict)
     validated_predictions: List[ValidationResult] = field(default_factory=list)
     data_start: Optional[datetime] = None
     data_end: Optional[datetime] = None
@@ -127,6 +162,8 @@ class BacktestResult:
             'win_rate_by_recommendation': {
                 k: round(v * 100, 1) for k, v in self.win_rate_by_recommendation.items()
             },
+            'forward_horizons': self.forward_horizons,
+            'by_horizon': self.by_horizon,
             'recent_validations': [v.to_dict() for v in self.validated_predictions[:20]],
             'data_start': self.data_start.strftime('%Y-%m-%d') if self.data_start else None,
             'data_end': self.data_end.strftime('%Y-%m-%d') if self.data_end else None,
@@ -182,6 +219,13 @@ class Backtester:
                     recommendation TEXT NOT NULL,
                     price_at_scoring REAL NOT NULL,
                     timestamp DATETIME NOT NULL,
+                    scoring_version TEXT DEFAULT 'v3',
+                    instrument_type TEXT DEFAULT 'equity',
+                    benchmark_ticker TEXT DEFAULT 'SPY',
+                    forward_horizons TEXT DEFAULT '[5, 20, 60]',
+                    transaction_cost_bps REAL DEFAULT 10.0,
+                    slippage_bps REAL DEFAULT 5.0,
+                    metadata TEXT DEFAULT '{}',
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
@@ -193,7 +237,20 @@ class Backtester:
                 CREATE INDEX IF NOT EXISTS idx_timestamp
                 ON score_history (timestamp)
             ''')
+            self._ensure_column(cursor, 'score_history', 'scoring_version', "TEXT DEFAULT 'v3'")
+            self._ensure_column(cursor, 'score_history', 'instrument_type', "TEXT DEFAULT 'equity'")
+            self._ensure_column(cursor, 'score_history', 'benchmark_ticker', "TEXT DEFAULT 'SPY'")
+            self._ensure_column(cursor, 'score_history', 'forward_horizons', "TEXT DEFAULT '[5, 20, 60]'")
+            self._ensure_column(cursor, 'score_history', 'transaction_cost_bps', "REAL DEFAULT 10.0")
+            self._ensure_column(cursor, 'score_history', 'slippage_bps', "REAL DEFAULT 5.0")
+            self._ensure_column(cursor, 'score_history', 'metadata', "TEXT DEFAULT '{}'")
             conn.commit()
+
+    def _ensure_column(self, cursor, table_name: str, column_name: str, definition: str):
+        cursor.execute(f"PRAGMA table_info({table_name})")
+        columns = {row[1] for row in cursor.fetchall()}
+        if column_name not in columns:
+            cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
 
     @contextmanager
     def _get_connection(self):
@@ -217,7 +274,15 @@ class Backtester:
         ticker: str,
         score: float,
         price: float,
-        timestamp: datetime = None
+        timestamp: datetime = None,
+        recommendation: Optional[str] = None,
+        scoring_version: str = 'v3',
+        instrument_type: str = 'equity',
+        benchmark_ticker: str = 'SPY',
+        forward_horizons: Optional[List[int]] = None,
+        transaction_cost_bps: float = 10.0,
+        slippage_bps: float = 5.0,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> ScoreRecord:
         """
         Record a score for later validation.
@@ -233,14 +298,33 @@ class Backtester:
         """
         ticker = ticker.upper()
         timestamp = timestamp or datetime.now()
-        recommendation = self._score_to_recommendation(score)
+        recommendation = recommendation or self._score_to_recommendation(score)
+        forward_horizons = forward_horizons or [5, 20, 60]
+        metadata = metadata or {}
 
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                INSERT INTO score_history (ticker, score, recommendation, price_at_scoring, timestamp)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (ticker, score, recommendation, price, timestamp))
+                INSERT INTO score_history (
+                    ticker, score, recommendation, price_at_scoring, timestamp,
+                    scoring_version, instrument_type, benchmark_ticker, forward_horizons,
+                    transaction_cost_bps, slippage_bps, metadata
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                ticker,
+                score,
+                recommendation,
+                price,
+                timestamp,
+                scoring_version,
+                instrument_type,
+                benchmark_ticker,
+                json.dumps(forward_horizons),
+                transaction_cost_bps,
+                slippage_bps,
+                json.dumps(metadata),
+            ))
             conn.commit()
             record_id = cursor.lastrowid
 
@@ -253,6 +337,13 @@ class Backtester:
             recommendation=recommendation,
             price_at_scoring=price,
             timestamp=timestamp,
+            scoring_version=scoring_version,
+            instrument_type=instrument_type,
+            benchmark_ticker=benchmark_ticker,
+            forward_horizons=forward_horizons,
+            transaction_cost_bps=transaction_cost_bps,
+            slippage_bps=slippage_bps,
+            metadata=metadata,
         )
 
     def get_historical_scores(
@@ -279,7 +370,9 @@ class Backtester:
 
             if ticker:
                 cursor.execute('''
-                    SELECT id, ticker, score, recommendation, price_at_scoring, timestamp
+                    SELECT id, ticker, score, recommendation, price_at_scoring, timestamp,
+                           scoring_version, instrument_type, benchmark_ticker, forward_horizons,
+                           transaction_cost_bps, slippage_bps, metadata
                     FROM score_history
                     WHERE ticker = ? AND timestamp >= ?
                     ORDER BY timestamp DESC
@@ -287,7 +380,9 @@ class Backtester:
                 ''', (ticker.upper(), cutoff, limit))
             else:
                 cursor.execute('''
-                    SELECT id, ticker, score, recommendation, price_at_scoring, timestamp
+                    SELECT id, ticker, score, recommendation, price_at_scoring, timestamp,
+                           scoring_version, instrument_type, benchmark_ticker, forward_horizons,
+                           transaction_cost_bps, slippage_bps, metadata
                     FROM score_history
                     WHERE timestamp >= ?
                     ORDER BY timestamp DESC
@@ -302,7 +397,14 @@ class Backtester:
                     score=row['score'],
                     recommendation=row['recommendation'],
                     price_at_scoring=row['price_at_scoring'],
-                    timestamp=datetime.strptime(row['timestamp'], '%Y-%m-%d %H:%M:%S'),
+                    timestamp=self._parse_timestamp(row['timestamp']),
+                    scoring_version=row['scoring_version'] or 'v3',
+                    instrument_type=row['instrument_type'] or 'equity',
+                    benchmark_ticker=row['benchmark_ticker'] or 'SPY',
+                    forward_horizons=json.loads(row['forward_horizons'] or '[5, 20, 60]'),
+                    transaction_cost_bps=row['transaction_cost_bps'] or 10.0,
+                    slippage_bps=row['slippage_bps'] or 5.0,
+                    metadata=json.loads(row['metadata'] or '{}'),
                 ))
 
         return records
@@ -318,6 +420,32 @@ class Backtester:
             return float(hist['Close'].iloc[-1])
         except Exception as e:
             logger.warning(f"Failed to get current price for {ticker}: {e}")
+            return None
+
+    def _parse_timestamp(self, raw_value: Any) -> datetime:
+        if isinstance(raw_value, datetime):
+            return raw_value
+        return datetime.fromisoformat(str(raw_value))
+
+    def _get_price_at_horizon(self, ticker: str, start_timestamp: datetime, horizon_days: int) -> Optional[Tuple[float, datetime]]:
+        try:
+            import yfinance as yf
+
+            start = (start_timestamp - timedelta(days=5)).date().isoformat()
+            end = (start_timestamp + timedelta(days=max(10, horizon_days * 3))).date().isoformat()
+            hist = yf.Ticker(ticker).history(start=start, end=end)
+            if hist.empty:
+                return None
+
+            hist.index = hist.index.tz_localize(None) if getattr(hist.index, 'tz', None) is not None else hist.index
+            future = hist[hist.index >= start_timestamp]
+            if len(future) <= horizon_days:
+                return None
+
+            row = future.iloc[horizon_days]
+            return float(row['Close']), future.index[horizon_days].to_pydatetime() if hasattr(future.index[horizon_days], 'to_pydatetime') else future.index[horizon_days]
+        except Exception as e:
+            logger.warning(f"Failed to get forward price for {ticker}: {e}")
             return None
 
     def _is_prediction_correct(
@@ -349,7 +477,8 @@ class Backtester:
     def validate_predictions(
         self,
         days: int = 30,
-        min_holding_days: int = 5
+        min_holding_days: int = 5,
+        horizons: Tuple[int, ...] = (5, 20, 60),
     ) -> List[ValidationResult]:
         """
         Validate past predictions against actual price movements.
@@ -362,13 +491,14 @@ class Backtester:
             List of ValidationResults
         """
         # Get predictions from the specified period
-        end_date = datetime.now() - timedelta(days=min_holding_days)
+        end_date = datetime.now() - timedelta(days=max(max(horizons), min_holding_days) + 5)
         start_date = end_date - timedelta(days=days)
 
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT DISTINCT ticker, score, recommendation, price_at_scoring, timestamp
+                SELECT DISTINCT ticker, score, recommendation, price_at_scoring, timestamp,
+                       scoring_version, instrument_type, benchmark_ticker, transaction_cost_bps, slippage_bps
                 FROM score_history
                 WHERE timestamp >= ? AND timestamp <= ?
                 ORDER BY timestamp DESC
@@ -385,32 +515,56 @@ class Backtester:
                     continue
                 seen_tickers.add(ticker)
 
-                # Get current price
-                current_price = self._get_current_price(ticker)
-                if current_price is None:
-                    continue
-
                 price_at_scoring = row['price_at_scoring']
                 if price_at_scoring <= 0:
                     continue
 
-                return_pct = ((current_price / price_at_scoring) - 1) * 100
-                timestamp = datetime.strptime(row['timestamp'], '%Y-%m-%d %H:%M:%S')
-                days_held = (datetime.now() - timestamp).days
+                timestamp = self._parse_timestamp(row['timestamp'])
 
-                correct = self._is_prediction_correct(row['recommendation'], return_pct)
+                for horizon in horizons:
+                    forward_price = self._get_price_at_horizon(ticker, timestamp, horizon)
+                    if forward_price is None:
+                        continue
 
-                validations.append(ValidationResult(
-                    ticker=ticker,
-                    score=row['score'],
-                    recommendation=row['recommendation'],
-                    price_at_scoring=price_at_scoring,
-                    price_current=current_price,
-                    return_pct=return_pct,
-                    days_held=days_held,
-                    correct=correct,
-                    timestamp=timestamp,
-                ))
+                    current_price, horizon_timestamp = forward_price
+                    return_pct = ((current_price / price_at_scoring) - 1) * 100
+                    benchmark_ticker = row['benchmark_ticker'] or 'SPY'
+                    benchmark_price = self._get_price_at_horizon(benchmark_ticker, timestamp, horizon)
+                    benchmark_return_pct = 0.0
+                    if benchmark_price is not None:
+                        benchmark_spot = self._get_price_at_horizon(benchmark_ticker, timestamp, 0)
+                        if benchmark_spot is not None and benchmark_spot[0] > 0:
+                            benchmark_return_pct = ((benchmark_price[0] / benchmark_spot[0]) - 1) * 100
+
+                    correct = self._is_prediction_correct(row['recommendation'], return_pct)
+                    cost_pct = ((row['transaction_cost_bps'] or 0) + (row['slippage_bps'] or 0)) / 100
+
+                    direction_adjusted_return = return_pct
+                    if row['recommendation'] in {'SELL', 'STRONG_SELL'}:
+                        direction_adjusted_return = -return_pct
+                    elif row['recommendation'] == 'HOLD':
+                        direction_adjusted_return = -abs(return_pct)
+
+                    validations.append(ValidationResult(
+                        ticker=ticker,
+                        score=row['score'],
+                        recommendation=row['recommendation'],
+                        price_at_scoring=price_at_scoring,
+                        price_current=current_price,
+                        return_pct=return_pct,
+                        horizon_days=horizon,
+                        instrument_type=row['instrument_type'] or 'equity',
+                        benchmark_ticker=benchmark_ticker,
+                        benchmark_return_pct=benchmark_return_pct,
+                        excess_return_pct=return_pct - benchmark_return_pct,
+                        net_return_pct=direction_adjusted_return - cost_pct,
+                        transaction_cost_bps=row['transaction_cost_bps'] or 0.0,
+                        slippage_bps=row['slippage_bps'] or 0.0,
+                        scoring_version=row['scoring_version'] or 'v3',
+                        days_held=(horizon_timestamp.date() - timestamp.date()).days,
+                        correct=correct,
+                        timestamp=timestamp,
+                    ))
 
         return validations
 
@@ -559,6 +713,17 @@ class Backtester:
 
             # Get all returns for overall metrics
             all_returns = [v.return_pct for v in validations]
+            by_horizon = {}
+            for horizon in sorted({v.horizon_days for v in validations}):
+                horizon_validations = [v for v in validations if v.horizon_days == horizon]
+                if not horizon_validations:
+                    continue
+                horizon_returns = [v.net_return_pct for v in horizon_validations]
+                by_horizon[str(horizon)] = {
+                    'count': len(horizon_validations),
+                    'hit_rate': round(sum(1 for v in horizon_validations if v.correct) / len(horizon_validations) * 100, 1),
+                    'avg_net_return': round(statistics.mean(horizon_returns), 2),
+                }
 
             # Get date range
             timestamps = [v.timestamp for v in validations]
@@ -592,6 +757,8 @@ class Backtester:
                     'SELL': win_rate(by_rec['SELL']),
                     'STRONG_SELL': win_rate(by_rec['STRONG_SELL']),
                 },
+                forward_horizons=sorted({v.horizon_days for v in validations}),
+                by_horizon=by_horizon,
                 validated_predictions=sorted(validations, key=lambda x: x.timestamp, reverse=True),
                 data_start=data_start,
                 data_end=data_end,
@@ -655,7 +822,12 @@ def get_backtester() -> Backtester:
     return _backtester
 
 
-def record_score(ticker: str, score: float, price: float) -> ScoreRecord:
+def record_score(
+    ticker: str,
+    score: float,
+    price: float,
+    **kwargs,
+) -> ScoreRecord:
     """
     Record a score for backtesting.
 
@@ -667,7 +839,7 @@ def record_score(ticker: str, score: float, price: float) -> ScoreRecord:
     Returns:
         ScoreRecord
     """
-    return get_backtester().record_score(ticker, score, price)
+    return get_backtester().record_score(ticker, score, price, **kwargs)
 
 
 def get_performance_report(period: str = '1M') -> BacktestResult:

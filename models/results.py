@@ -43,10 +43,13 @@ class QualityFlag:
 @dataclass
 class QualityGateResult:
     """Result from Layer 1: Quality Gate analysis"""
-    passed: bool
+    passed: Optional[bool]
     flags: List[QualityFlag] = field(default_factory=list)
     confidence: float = 0.5  # 0-1, how confident in the assessment
     data_quality: str = 'complete'  # 'complete', 'partial', 'insufficient'
+    status: str = 'available'  # 'available', 'unknown', 'not_applicable', 'unavailable'
+    applicable: bool = True
+    reason: str = ""
 
     # Specific metrics calculated
     altman_z_score: Optional[float] = None
@@ -56,6 +59,9 @@ class QualityGateResult:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
+            'status': self.status,
+            'applicable': self.applicable,
+            'reason': self.reason or None,
             'passed': self.passed,
             'flags': [f.to_dict() for f in self.flags],
             'confidence': round(self.confidence, 2),
@@ -101,9 +107,17 @@ class IntrinsicValueResult:
     methods_used: List[ValuationMethod] = field(default_factory=list)
     conviction: float = 0.5  # 0-1, based on method agreement
     implied_growth_rate: Optional[float] = None  # From reverse DCF
+    status: str = 'available'
+    applicable: bool = True
+    data_quality: str = 'complete'
+    reason: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {
+            'status': self.status,
+            'applicable': self.applicable,
+            'data_quality': self.data_quality,
+            'reason': self.reason or None,
             'fair_value_low': round(self.fair_value_low, 2) if self.fair_value_low else None,
             'fair_value_mid': round(self.fair_value_mid, 2) if self.fair_value_mid else None,
             'fair_value_high': round(self.fair_value_high, 2) if self.fair_value_high else None,
@@ -131,22 +145,30 @@ class RegimeType(Enum):
 class MarketRegimeResult:
     """Result from Layer 3: Market Regime analysis"""
     regime: str = 'ROTATION'  # RegimeType value
-    vix_level: float = 20.0
-    vix_percentile: float = 50.0  # Where current VIX is vs history
+    vix_level: Optional[float] = None
+    vix_percentile: Optional[float] = None  # Where current VIX is vs history
     spy_trend: str = 'NEUTRAL'  # 'UPTREND', 'DOWNTREND', 'NEUTRAL'
-    breadth: float = 50.0  # % of stocks above 200 SMA
+    breadth: Optional[float] = None  # % of stocks above 200 SMA
     sector_rotation: Dict[str, str] = field(default_factory=dict)  # sector: 'leading'/'lagging'
     factor_weights: Dict[str, float] = field(default_factory=dict)  # Adjusted weights
     confidence: float = 0.5
     description: str = ""
+    status: str = 'available'
+    applicable: bool = True
+    data_quality: str = 'complete'
+    reason: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {
+            'status': self.status,
+            'applicable': self.applicable,
+            'data_quality': self.data_quality,
+            'reason': self.reason or None,
             'regime': self.regime,
-            'vix': round(self.vix_level, 2),
-            'vix_percentile': round(self.vix_percentile, 1),
+            'vix': round(self.vix_level, 2) if self.vix_level is not None else None,
+            'vix_percentile': round(self.vix_percentile, 1) if self.vix_percentile is not None else None,
             'spy_trend': self.spy_trend,
-            'breadth': round(self.breadth, 1),
+            'breadth': round(self.breadth, 1) if self.breadth is not None else None,
             'sector_rotation': self.sector_rotation,
             'factor_weights': {k: round(v, 2) for k, v in self.factor_weights.items()},
             'confidence': round(self.confidence, 2),
@@ -190,9 +212,17 @@ class TechnicalConfluenceResult:
 
     # Raw indicators for display
     indicators: Dict[str, float] = field(default_factory=dict)
+    status: str = 'available'
+    applicable: bool = True
+    data_quality: str = 'complete'
+    reason: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {
+            'status': self.status,
+            'applicable': self.applicable,
+            'data_quality': self.data_quality,
+            'reason': self.reason or None,
             'confluence_score': round(self.confluence_score, 1),
             'signals_bullish': self.signals_bullish,
             'signals_bearish': self.signals_bearish,
@@ -233,6 +263,29 @@ class Catalyst:
 
 
 @dataclass
+class AnalyzedArticle:
+    """A normalized article used in sentiment and catalyst analysis."""
+    title: str
+    source: str
+    published: Optional[str] = None
+    url: Optional[str] = None
+    sentiment: str = 'NEUTRAL'
+    confidence: float = 0.0
+    content_quality: str = 'insufficient_content'
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'title': self.title,
+            'source': self.source,
+            'published': self.published,
+            'url': self.url,
+            'sentiment': self.sentiment,
+            'confidence': round(self.confidence, 2),
+            'content_quality': self.content_quality,
+        }
+
+
+@dataclass
 class CatalystResult:
     """Result from Layer 5: Catalyst analysis"""
     catalysts: List[Catalyst] = field(default_factory=list)
@@ -242,16 +295,26 @@ class CatalystResult:
     risk_factor: float = 0.5  # 0-1, uncertainty from catalysts
     news_sentiment_score: float = 0.0  # -1 to +1
     social_sentiment_score: Optional[float] = None  # -1 to +1, from X API
+    analyzed_articles: List[AnalyzedArticle] = field(default_factory=list)
+    status: str = 'available'
+    applicable: bool = True
+    data_quality: str = 'complete'
+    reason: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {
+            'status': self.status,
+            'applicable': self.applicable,
+            'data_quality': self.data_quality,
+            'reason': self.reason or None,
             'catalysts': [c.to_dict() for c in self.catalysts],
             'nearest': self.nearest_catalyst.to_dict() if self.nearest_catalyst else None,
             'days_to_nearest': self.days_to_nearest,
             'sentiment': self.catalyst_sentiment,
             'risk_factor': round(self.risk_factor, 2),
             'news_sentiment': round(self.news_sentiment_score, 2),
-            'social_sentiment': round(self.social_sentiment_score, 2) if self.social_sentiment_score else None
+            'social_sentiment': round(self.social_sentiment_score, 2) if self.social_sentiment_score else None,
+            'articles': [article.to_dict() for article in self.analyzed_articles],
         }
 
 

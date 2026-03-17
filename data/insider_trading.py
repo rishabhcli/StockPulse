@@ -186,54 +186,8 @@ class InsiderTradingAnalyzer:
         to parse the XML files. This simplified version extracts what
         we can from the metadata.
         """
-        trades = []
-        cutoff_date = datetime.now() - timedelta(days=days)
-
-        try:
-            recent = filings_data.get('filings', {}).get('recent', {})
-
-            forms = recent.get('form', [])
-            dates = recent.get('filingDate', [])
-            accessions = recent.get('accessionNumber', [])
-            primary_docs = recent.get('primaryDocument', [])
-
-            for i, form in enumerate(forms):
-                # Only process Form 4 (insider ownership changes)
-                if form != '4':
-                    continue
-
-                if i >= len(dates):
-                    continue
-
-                try:
-                    filing_date = datetime.strptime(dates[i], '%Y-%m-%d')
-                except:
-                    continue
-
-                if filing_date < cutoff_date:
-                    continue
-
-                # Extract reporting owner from accession
-                # Note: Full parsing would require fetching the XML file
-                # This is a simplified approximation
-
-                # For now, create a placeholder trade entry
-                # In production, you'd fetch and parse the actual Form 4 XML
-                trades.append(InsiderTrade(
-                    insider_name="Insider",  # Would parse from XML
-                    title="Officer/Director",  # Would parse from XML
-                    trade_type="UNKNOWN",  # Would parse from XML
-                    shares=0,
-                    price=None,
-                    value=None,
-                    date=filing_date,
-                    form_type='4'
-                ))
-
-        except Exception as e:
-            logger.debug(f"Error parsing Form 4 filings: {e}")
-
-        return trades
+        logger.info("Skipping SEC Form 4 metadata-only parsing because XML transaction parsing is not implemented.")
+        return []
 
     def _fetch_insider_data_fallback(self, ticker: str) -> List[InsiderTrade]:
         """
@@ -439,8 +393,9 @@ class InsiderTradingAnalyzer:
             executive_buying=analysis['executive_buying'],
             unique_buyers=analysis['unique_buyers'],
             unique_sellers=analysis['unique_sellers'],
-            confidence=min(0.95, confidence),
-            data_date=datetime.now(),
+            confidence=min(0.95, confidence) if trades else 0.0,
+            data_date=datetime.now() if trades else None,
+            error=None if trades else 'Detailed insider transaction data unavailable',
         )
 
 

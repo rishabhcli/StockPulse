@@ -1,11 +1,13 @@
 import { useEffect } from 'react';
 import { Stack, Redirect, SplashScreen } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { Platform, StyleSheet, Text, TextInput } from 'react-native';
+import { Platform, StyleSheet } from 'react-native';
+import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { PaperProvider, MD3DarkTheme } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useFonts } from 'expo-font';
+import * as Sentry from '@sentry/react-native';
 import { ErrorBoundary } from '../components/ErrorBoundary';
 import {
   DMSans_400Regular,
@@ -19,6 +21,7 @@ import {
   InstrumentSerif_400Regular_Italic,
 } from '@expo-google-fonts/instrument-serif';
 import { colors, fontFamily } from '../constants/theme';
+import { queryClient, queryPersister } from '../lib/queryClient';
 import { useAuthStore } from '../stores/useAuthStore';
 import { useTradingStore } from '../stores/useTradingStore';
 import { useWatchlistStore } from '../stores/useWatchlistStore';
@@ -28,27 +31,19 @@ import SheetProvider from '../components/sheets/SheetProvider';
 // Keep splash screen visible while fonts load
 SplashScreen.preventAutoHideAsync();
 
-// ---------------------------------------------------------------------------
-// Global default font — DM Sans (matching the web app's --sans)
-// Patches Text.render so every <Text> inherits fontFamily unless overridden.
-// ---------------------------------------------------------------------------
-const _origTextRender = (Text as any).render;
-if (_origTextRender) {
-  (Text as any).render = function (props: any, ref: any) {
-    return _origTextRender.call(this, {
-      ...props,
-      style: [{ fontFamily: 'DMSans_400Regular' }, props.style],
-    }, ref);
-  };
-}
-const _origInputRender = (TextInput as any).render;
-if (_origInputRender) {
-  (TextInput as any).render = function (props: any, ref: any) {
-    return _origInputRender.call(this, {
-      ...props,
-      style: [{ fontFamily: 'DMSans_400Regular' }, props.style],
-    }, ref);
-  };
+const sentryDsn = process.env.EXPO_PUBLIC_SENTRY_DSN;
+let sentryConfigured = false;
+
+if (sentryDsn && !sentryConfigured) {
+  Sentry.init({
+    dsn: sentryDsn,
+    enabled: !__DEV__,
+    environment: process.env.EXPO_PUBLIC_APP_ENV ?? 'development',
+    tracesSampleRate: Number(process.env.EXPO_PUBLIC_SENTRY_TRACES_SAMPLE_RATE ?? 0),
+    profilesSampleRate: Number(process.env.EXPO_PUBLIC_SENTRY_PROFILES_SAMPLE_RATE ?? 0),
+    attachScreenshot: false,
+  });
+  sentryConfigured = true;
 }
 
 // ============================================================================
@@ -191,104 +186,105 @@ export default function RootLayout() {
     }
   }, [fontsLoaded, isLoading]);
 
-  // Show loading screen while checking auth state or loading fonts
-  if (isLoading || !fontsLoaded) {
-    return (
-      <SafeAreaProvider>
-        <PaperProvider theme={paperTheme}>
-          <Loading fullScreen message="Loading..." />
-        </PaperProvider>
-      </SafeAreaProvider>
-    );
-  }
+  const content = isLoading || !fontsLoaded ? (
+    <SafeAreaProvider>
+      <PaperProvider theme={paperTheme}>
+        <Loading fullScreen message="Loading..." />
+      </PaperProvider>
+    </SafeAreaProvider>
+  ) : (
+    <ErrorBoundary>
+      <GestureHandlerRootView style={layoutStyles.root}>
+        <SafeAreaProvider>
+          <PaperProvider theme={paperTheme}>
+            <SheetProvider>
+              <StatusBar style="light" />
+              {/* Redirect to login if not authenticated */}
+              {!isAuthenticated && <Redirect href="/auth/login" />}
+              <Stack
+                screenOptions={{
+                  headerShown: false,
+                  contentStyle: { backgroundColor: colors.background },
+                  animation: Platform.select({
+                    ios: 'default',
+                    android: 'fade_from_bottom',
+                    default: 'fade',
+                  }),
+                }}
+              >
+                <Stack.Screen name="auth" options={{ headerShown: false }} />
+                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                <Stack.Screen
+                  name="stock/[ticker]"
+                  options={{
+                    headerShown: true,
+                    headerStyle: {
+                      backgroundColor: Platform.OS === 'ios'
+                        ? colors.ios.glassThick
+                        : colors.android.surfaceContainer,
+                    },
+                    headerTintColor: colors.text,
+                    headerBackTitle: 'Back',
+                    headerShadowVisible: false,
+                    presentation: Platform.OS === 'ios' ? 'card' : 'modal',
+                    animation: Platform.OS === 'ios' ? 'default' : 'slide_from_right',
+                  }}
+                />
+                {/* Native iOS formSheet with Liquid Glass on iOS 26+ */}
+                <Stack.Screen
+                  name="sheets/stock/[ticker]"
+                  options={{
+                    headerShown: false,
+                    presentation: 'formSheet',
+                    // CRITICAL: Transparent for iOS 26 Liquid Glass
+                    contentStyle: {
+                      backgroundColor: Platform.select({
+                        ios: 'transparent',
+                        android: colors.android.surfaceContainerHigh,
+                        default: colors.surface,
+                      }),
+                    },
+                    // Sheet detents
+                    sheetAllowedDetents: [0.5, 0.75, 1.0],
+                    sheetInitialDetentIndex: 1,
+                    sheetGrabberVisible: false,
+                    sheetCornerRadius: 24,
+                    sheetLargestUndimmedDetentIndex: 0,
+                    gestureEnabled: true,
+                  }}
+                />
+                <Stack.Screen
+                  name="sheets/glossary/[term]"
+                  options={{
+                    headerShown: false,
+                    presentation: 'formSheet',
+                    contentStyle: {
+                      backgroundColor: Platform.select({
+                        ios: 'transparent',
+                        android: colors.android.surfaceContainerHigh,
+                        default: colors.surface,
+                      }),
+                    },
+                    sheetAllowedDetents: [0.4, 0.7],
+                    sheetInitialDetentIndex: 1,
+                    sheetGrabberVisible: false,
+                    sheetCornerRadius: 24,
+                    sheetLargestUndimmedDetentIndex: 0,
+                    gestureEnabled: true,
+                  }}
+                />
+              </Stack>
+            </SheetProvider>
+          </PaperProvider>
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
+    </ErrorBoundary>
+  );
 
   return (
-    <ErrorBoundary>
-    <GestureHandlerRootView style={layoutStyles.root}>
-      <SafeAreaProvider>
-        <PaperProvider theme={paperTheme}>
-          <SheetProvider>
-            <StatusBar style="light" />
-            {/* Redirect to login if not authenticated */}
-            {!isAuthenticated && <Redirect href="/auth/login" />}
-            <Stack
-            screenOptions={{
-              headerShown: false,
-              contentStyle: { backgroundColor: colors.background },
-              animation: Platform.select({
-                ios: 'default',
-                android: 'fade_from_bottom',
-                default: 'fade',
-              }),
-            }}
-          >
-            <Stack.Screen name="auth" options={{ headerShown: false }} />
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            <Stack.Screen
-              name="stock/[ticker]"
-              options={{
-                headerShown: true,
-                headerStyle: {
-                  backgroundColor: Platform.OS === 'ios'
-                    ? colors.ios.glassThick
-                    : colors.android.surfaceContainer,
-                },
-                headerTintColor: colors.text,
-                headerBackTitle: 'Back',
-                headerShadowVisible: false,
-                presentation: Platform.OS === 'ios' ? 'card' : 'modal',
-                animation: Platform.OS === 'ios' ? 'default' : 'slide_from_right',
-              }}
-            />
-            {/* Native iOS formSheet with Liquid Glass on iOS 26+ */}
-            <Stack.Screen
-              name="sheets/stock/[ticker]"
-              options={{
-                headerShown: false,
-                presentation: 'formSheet',
-                // CRITICAL: Transparent for iOS 26 Liquid Glass
-                contentStyle: {
-                  backgroundColor: Platform.select({
-                    ios: 'transparent',
-                    android: colors.android.surfaceContainerHigh,
-                    default: colors.surface,
-                  }),
-                },
-                // Sheet detents
-                sheetAllowedDetents: [0.5, 0.75, 1.0],
-                sheetInitialDetentIndex: 1,
-                sheetGrabberVisible: false,
-                sheetCornerRadius: 24,
-                sheetLargestUndimmedDetentIndex: 0,
-                gestureEnabled: true,
-              }}
-            />
-            <Stack.Screen
-              name="sheets/glossary/[term]"
-              options={{
-                headerShown: false,
-                presentation: 'formSheet',
-                contentStyle: {
-                  backgroundColor: Platform.select({
-                    ios: 'transparent',
-                    android: colors.android.surfaceContainerHigh,
-                    default: colors.surface,
-                  }),
-                },
-                sheetAllowedDetents: [0.4, 0.7],
-                sheetInitialDetentIndex: 1,
-                sheetGrabberVisible: false,
-                sheetCornerRadius: 24,
-                sheetLargestUndimmedDetentIndex: 0,
-                gestureEnabled: true,
-              }}
-            />
-            </Stack>
-          </SheetProvider>
-        </PaperProvider>
-      </SafeAreaProvider>
-    </GestureHandlerRootView>
-    </ErrorBoundary>
+    <PersistQueryClientProvider client={queryClient} persistOptions={{ persister: queryPersister }}>
+      {content}
+    </PersistQueryClientProvider>
   );
 }
 

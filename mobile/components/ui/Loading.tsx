@@ -88,7 +88,7 @@ interface CardSkeletonProps {
 export function CardSkeleton({ style, variant = 'compact' }: CardSkeletonProps) {
   if (variant === 'full') {
     return (
-      <View style={[styles.cardSkeleton, styles.cardSkeletonFull, style]}>
+      <View style={[styles.cardSkeleton as any, styles.cardSkeletonFull as any, style]}>
         <View style={styles.cardSkeletonHeader}>
           <View style={styles.cardSkeletonHeaderText}>
             <Skeleton width="50%" height={20} />
@@ -105,7 +105,7 @@ export function CardSkeleton({ style, variant = 'compact' }: CardSkeletonProps) 
   }
 
   return (
-    <View style={[styles.cardSkeleton, style]}>
+    <View style={[styles.cardSkeleton as any, style]}>
       <View style={styles.cardSkeletonCompact}>
         <Skeleton width={44} height={44} borderRadius={22} />
         <View style={styles.cardSkeletonCompactText}>

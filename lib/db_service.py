@@ -32,27 +32,33 @@ class DatabaseService:
             return None
 
         try:
+            layer_analysis = result.get('layer_analysis', {}) or {}
+            technical_layer = layer_analysis.get('technical_confluence', {}) or {}
+            value_layer = layer_analysis.get('intrinsic_value', {}) or {}
+            display_indicators = result.get('display_indicators', {}) or {}
+            recommendation_reasons = result.get('evidence') or [result.get('explanation')] if result.get('explanation') else []
+
             record = {
                 'ticker': result.get('ticker', ''),
                 'company_name': result.get('company_name', result.get('ticker', '')),
                 'investment_score': result.get('score', 0),
-                'technical_score': result.get('technical_score', 0),
-                'fundamental_score': result.get('fundamental_score', 0),
+                'technical_score': result.get('technical_score', technical_layer.get('confluence_score', 0)),
+                'fundamental_score': result.get('fundamental_score', value_layer.get('conviction', 0)),
                 'current_price': result.get('current_price', 0),
                 'price_change': result.get('dollar_change'),
                 'price_change_pct': result.get('change_pct'),
                 'recommendation': result.get('recommendation', 'HOLD'),
-                'recommendation_reasons': result.get('evidence', []),
+                'recommendation_reasons': recommendation_reasons or [],
                 'technical_analysis': {
-                    'indicators': result.get('indicators', {}),
+                    'indicators': result.get('indicators', display_indicators),
                     'individual_scores': result.get('individual_scores', {}),
-                    'signals': result.get('signals', {}),
+                    'signals': result.get('signals', technical_layer),
                 },
                 'fundamental_analysis': result.get('fundamentals', {}),
-                'market_sentiment': result.get('market_sentiment'),
+                'market_sentiment': result.get('market_sentiment', result.get('market_context')),
                 'news_analysis': result.get('news_analysis'),
                 'earnings_data': result.get('earnings'),
-                'timestamp': datetime.utcnow().isoformat(),
+                'timestamp': result.get('generated_at', datetime.utcnow().isoformat()),
             }
 
             resp = self.supabase.table('stock_analyses').insert(record).execute()

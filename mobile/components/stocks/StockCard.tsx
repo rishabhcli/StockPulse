@@ -14,6 +14,7 @@ import { formatPrice, formatPercent } from '../../lib/utils';
 import Badge from '../ui/Badge';
 import { isLiquidGlassAvailable } from '../ui/Surface';
 import { useSheetContext } from '../sheets/SheetProvider';
+import { confidenceVariant, dataQualityVariant, formatTimestampLabel, isTimestampStale } from '../../lib/presentation';
 
 // iOS 26 Liquid Glass
 let GlassView: any = null;
@@ -44,8 +45,11 @@ const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 export function StockCard({ stock, variant = 'compact', onPress }: StockCardProps) {
   const { openStockSheet } = useSheetContext();
-  const scoreColor = getScoreColor(stock.investment_score);
-  const isPositive = stock.price_change_pct >= 0;
+  const score = stock.score ?? stock.investment_score;
+  const scoreColor = getScoreColor(score);
+  const isPositive = (stock.change_pct ?? stock.price_change_pct) >= 0;
+  const freshness = stock.freshness_summary ?? formatTimestampLabel(stock.generated_at);
+  const stale = isTimestampStale(stock.generated_at);
   const pressed = useSharedValue(0);
 
   const handlePressIn = () => {
@@ -101,7 +105,7 @@ export function StockCard({ stock, variant = 'compact', onPress }: StockCardProp
         <View style={styles.compactLeft}>
           <View style={styles.scoreIndicatorContainer}>
             <View style={[styles.scoreIndicator, { backgroundColor: scoreColor }]}>
-              <Text style={styles.scoreText}>{Math.round(stock.investment_score)}</Text>
+              <Text style={styles.scoreText}>{Math.round(score)}</Text>
             </View>
             <View style={[styles.scoreRing, { borderColor: scoreColor }]} />
           </View>
@@ -110,6 +114,11 @@ export function StockCard({ stock, variant = 'compact', onPress }: StockCardProp
             <Text style={styles.companyName} numberOfLines={1}>
               {stock.company_name}
             </Text>
+            <View style={styles.compactBadges}>
+              <Badge label={stock.recommendation} variant={getBadgeVariant(stock.recommendation)} size="small" />
+              <Badge label={stock.confidence} variant={confidenceVariant(stock.confidence)} size="small" />
+              <Badge label={stale ? 'Stale' : freshness} variant={stale ? 'warning' : 'neutral'} size="small" />
+            </View>
           </View>
         </View>
         <View style={styles.compactRight}>
@@ -126,7 +135,7 @@ export function StockCard({ stock, variant = 'compact', onPress }: StockCardProp
               color={isPositive ? colors.strongBuy : colors.error}
             />
             <Text style={[styles.change, isPositive ? styles.positive : styles.negative]}>
-              {formatPercent(stock.price_change_pct)}
+              {formatPercent(stock.change_pct ?? stock.price_change_pct)}
             </Text>
           </View>
         </View>
@@ -228,7 +237,7 @@ export function StockCard({ stock, variant = 'compact', onPress }: StockCardProp
               color={isPositive ? colors.strongBuy : colors.error}
             />
             <Text style={[styles.changeLarge, isPositive ? styles.positive : styles.negative]}>
-              {formatPercent(stock.price_change_pct)}
+              {formatPercent(stock.change_pct ?? stock.price_change_pct)}
             </Text>
           </View>
         </View>
@@ -240,6 +249,11 @@ export function StockCard({ stock, variant = 'compact', onPress }: StockCardProp
             size="large"
           />
           {stock.sector && <Text style={styles.sector}>{stock.sector}</Text>}
+          <View style={styles.fullBadges}>
+            <Badge label={stock.confidence} variant={confidenceVariant(stock.confidence)} size="small" />
+            <Badge label={stock.data_quality?.status ?? 'unknown'} variant={dataQualityVariant(stock.data_quality)} size="small" />
+            <Badge label={stale ? 'Stale' : freshness} variant={stale ? 'warning' : 'neutral'} size="small" />
+          </View>
         </View>
       </View>
     </AnimatedPressable>
@@ -298,6 +312,12 @@ const styles = StyleSheet.create({
   compactInfo: {
     flex: 1,
     marginLeft: spacing.sm,
+  },
+  compactBadges: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+    marginTop: spacing.xs,
   },
   scoreIndicatorContainer: {
     position: 'relative',
@@ -485,6 +505,12 @@ const styles = StyleSheet.create({
   },
   recommendationSection: {
     alignItems: 'flex-end',
+  },
+  fullBadges: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+    marginTop: spacing.sm,
   },
   sector: {
     color: colors.textMuted,

@@ -1,38 +1,4 @@
-export interface StockAnalysis {
-  ticker: string;
-  company_name: string;
-  investment_score: number;
-  current_price: number;
-  price_change: number;
-  price_change_pct: number;
-  recommendation: string;
-  recommendation_reasons: string[];
-  technical_score: number;
-  fundamental_score: number;
-  technical_analysis: TechnicalAnalysis;
-  fundamental_analysis: FundamentalAnalysis;
-  market_sentiment: MarketSentiment;
-  news_analysis: NewsAnalysis;
-  earnings_data: EarningsData;
-  timestamp: string;
-}
-
-export interface TechnicalAnalysis {
-  rsi: IndicatorData;
-  macd: MACDData;
-  bollinger: BollingerData;
-  stochastic: StochasticData;
-  adx: IndicatorData;
-  mfi: IndicatorData;
-  obv: OBVData;
-  williams_r: IndicatorData;
-  cci: IndicatorData;
-  vwap: VWAPData;
-  moving_averages: MovingAveragesData;
-  support_levels: number[];
-  resistance_levels: number[];
-  patterns: string[];
-}
+export type ConfidenceLevel = 'HIGH' | 'MEDIUM' | 'LOW';
 
 export interface IndicatorData {
   value: number;
@@ -47,65 +13,84 @@ export interface MACDData {
   trend: 'bullish' | 'bearish' | 'neutral';
 }
 
-export interface BollingerData {
-  upper: number;
-  middle: number;
-  lower: number;
-  position: string;
-}
-
 export interface StochasticData {
   k: number;
   d: number;
   signal: 'bullish' | 'bearish' | 'neutral';
 }
 
-export interface OBVData {
-  value: number;
-  trend: string;
+export interface TechnicalAnalysis {
+  rsi?: IndicatorData | null;
+  macd?: MACDData | null;
+  stochastic?: StochasticData | null;
+  adx?: IndicatorData | null;
+  mfi?: IndicatorData | null;
+  cci?: IndicatorData | null;
 }
 
-export interface VWAPData {
-  value: number;
-  position: string;
+export interface DataQualitySummary {
+  status: 'complete' | 'partial' | 'unavailable';
+  core_inputs_complete: boolean;
+  applicable_layers: string[];
+  available_layers: string[];
+  missing_optional_inputs: string[];
+  freshness_summary?: string | null;
 }
 
-export interface MovingAveragesData {
-  sma_20: number;
-  sma_50: number;
-  sma_200: number;
-  trend: string;
+export interface DisplayIndicators {
+  current_price: number | null;
+  price_change: number | null;
+  price_change_pct: number | null;
+  rsi?: number | null;
+  sma_20?: number | null;
+  sma_50?: number | null;
+  sma_200?: number | null;
+  trend_alignment?: string | null;
+  vix?: number | null;
+  relative_strength?: Record<string, any> | null;
 }
 
 export interface FundamentalAnalysis {
-  pe_ratio: number | null;
-  forward_pe: number | null;
-  peg_ratio: number | null;
-  price_to_book: number | null;
-  debt_to_equity: number | null;
-  profit_margin: number | null;
-  roe: number | null;
-  revenue_growth: number | null;
-  earnings_growth: number | null;
-  dividend_yield: number | null;
-  analyst_rating: string;
-  price_target: number | null;
+  status: string;
+  reason?: string;
+  market_cap?: number | null;
+  trailing_pe?: number | null;
+  forward_pe?: number | null;
+  peg_ratio?: number | null;
+  price_to_book?: number | null;
+  debt_to_equity?: number | null;
+  profit_margin?: number | null;
+  return_on_equity?: number | null;
+  revenue_growth?: number | null;
+  valuation_signal?: string | null;
+  margin_of_safety?: number | null;
+  fair_value_range?: Record<string, number> | null;
+  quality_gate?: Record<string, any> | null;
+  pe_ratio?: number | null;
+  roe?: number | null;
+  dividend_yield?: number | null;
 }
 
 export interface MarketSentiment {
-  vix: number;
+  signal?: string | null;
+  vix: number | null;
   vix_signal: string;
   fear_greed_index: number;
   fear_greed_label: string;
-  treasury_10y: number;
+  treasury_10y: number | null;
   sp500_trend: string;
   overall_sentiment: string;
-}
-
-export interface NewsAnalysis {
-  articles: NewsArticle[];
-  overall_sentiment: string;
-  sentiment_score: number;
+  regime?: string | null;
+  regime_status?: string | null;
+  regime_confidence?: number | null;
+  description?: string | null;
+  breadth?: number | null;
+  risk_proxies?: Record<string, number> | null;
+  yield_curve?: Record<string, any> | null;
+  fed_stance?: string | null;
+  sources?: Record<string, any> | null;
+  generated_at?: string;
+  request_id?: string | null;
 }
 
 export interface NewsArticle {
@@ -113,13 +98,21 @@ export interface NewsArticle {
   source: string;
   sentiment: string;
   published: string;
+  content_quality?: string;
+  url?: string | null;
 }
 
-export interface EarningsData {
-  last_earnings_date: string;
-  last_earnings_surprise: number;
-  next_earnings_date: string;
-  earnings_history: EarningsHistoryItem[];
+export interface NewsAnalysis {
+  status?: string;
+  data_quality?: string;
+  overall_sentiment: string;
+  sentiment_score: number;
+  risk_factor?: number;
+  articles: NewsArticle[];
+  catalysts?: Record<string, any>[];
+  nearest_catalyst?: Record<string, any> | null;
+  days_to_nearest?: number | null;
+  reason?: string | null;
 }
 
 export interface EarningsHistoryItem {
@@ -129,25 +122,100 @@ export interface EarningsHistoryItem {
   surprise_pct: number;
 }
 
+export interface EarningsData {
+  status: string;
+  source?: string;
+  last_earnings_date: string | null;
+  last_earnings_surprise: number | null;
+  next_earnings_date: string | null;
+  days_until?: number | null;
+  earnings_history: EarningsHistoryItem[];
+  analyst_price_targets?: Record<string, number>;
+  error?: string | null;
+}
+
+export interface LayerAnalysis {
+  quality_gate?: Record<string, any>;
+  intrinsic_value?: Record<string, any>;
+  market_regime?: Record<string, any>;
+  technical_confluence?: Record<string, any>;
+  catalyst?: Record<string, any>;
+}
+
+export interface StockAnalysis {
+  ticker: string;
+  company_name: string;
+  sector?: string | null;
+  industry?: string | null;
+  instrument_type: string;
+  scoring_version: 'v3';
+  calibration_version?: string;
+  score: number;
+  recommendation: string;
+  action: string;
+  confidence: ConfidenceLevel;
+  agreement_level?: number;
+  explanation: string;
+  layer_analysis: LayerAnalysis;
+  data_quality: DataQualitySummary;
+  sources_used: Record<string, any>;
+  missing_inputs: string[];
+  stale_inputs: string[];
+  display_indicators: DisplayIndicators;
+  fundamentals: FundamentalAnalysis;
+  market_context: Record<string, any>;
+  news_analysis: NewsAnalysis;
+  earnings: EarningsData;
+  current_price: number;
+  change_pct: number;
+  dollar_change: number;
+  generated_at: string;
+  request_id?: string | null;
+  freshness_summary?: string | null;
+  status?: 'available' | 'unavailable';
+  code?: string | null;
+  reason?: string | null;
+
+  // Compatibility fields still used by current UI
+  investment_score: number;
+  price_change: number;
+  price_change_pct: number;
+  recommendation_reasons: string[];
+  technical_score: number;
+  fundamental_score: number;
+  technical_analysis: TechnicalAnalysis | null;
+  fundamental_analysis: FundamentalAnalysis | null;
+  market_sentiment: MarketSentiment;
+  timestamp: string;
+}
+
 export interface ScreenerResult {
   ticker: string;
   company_name: string;
-  investment_score: number;
-  current_price: number;
-  price_change_pct: number;
-  dollar_change?: number;
+  sector?: string | null;
+  industry?: string | null;
+  instrument_type?: string | null;
+  score: number;
   recommendation: string;
-  confidence?: string;
-  rsi?: number;
-  sector?: string;
-  industry?: string;
-  market_cap?: number;
-  market_cap_display?: string;
-  size_category?: string;
-  country?: string;
-  description?: string;
-  employees?: number;
-  employees_display?: string;
+  confidence: ConfidenceLevel;
+  data_quality: DataQualitySummary;
+  current_price: number;
+  change_pct: number;
+  display_indicators?: DisplayIndicators;
+
+  // Compatibility fields still used by current UI
+  investment_score: number;
+  price_change_pct: number;
+  generated_at?: string;
+  request_id?: string | null;
+  freshness_summary?: string | null;
+}
+
+export interface IndexData {
+  symbol: string;
+  name: string;
+  price: number;
+  change_pct: number;
 }
 
 export interface PennyStock {
@@ -181,13 +249,33 @@ export interface MarketSnapshot {
   shorts: ScreenerResult[];
   indices: IndexData[];
   penny_stocks: PennyStock[];
+  eligible_count?: number;
+  excluded_count?: number;
+  excluded_reasons_summary?: Record<string, number>;
+  generated_at?: string;
+  request_id?: string | null;
+  freshness_summary?: string | null;
 }
 
-export interface IndexData {
-  symbol: string;
-  name: string;
-  price: number;
-  change_pct: number;
+export interface EarningsCalendarItem {
+  ticker: string;
+  company_name: string;
+  sector?: string | null;
+  industry?: string | null;
+  current_price: number | null;
+  earnings_date: string;
+  days_until: number;
+  earnings_history: EarningsHistoryItem[];
+  prev_surprise_pct: number | null;
+  analyst_price_targets?: Record<string, number>;
+  status: string;
+  score?: number | null;
+  recommendation?: string | null;
+  confidence?: ConfidenceLevel | null;
+  data_quality?: DataQualitySummary | null;
+  generated_at?: string;
+  request_id?: string | null;
+  freshness_summary?: string | null;
 }
 
 // ========== Supabase Types ==========
@@ -257,14 +345,4 @@ export interface Trade {
   is_manual: boolean;
   cash_after: number | null;
   executed_at: string;
-}
-
-export interface PortfolioSnapshot {
-  id: string;
-  portfolio_id: string;
-  total_value: number;
-  cash: number;
-  positions_value: number;
-  spy_price: number | null;
-  timestamp: string;
 }

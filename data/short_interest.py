@@ -141,6 +141,23 @@ class ShortInterestAnalyzer:
                 change
             )
 
+            if not any([
+                short_interest,
+                short_percent_float,
+                short_percent_shares,
+                short_ratio,
+                prior_short,
+                change is not None,
+            ]):
+                return ShortInterestResult(
+                    ticker=ticker,
+                    signal='UNAVAILABLE',
+                    squeeze_risk='UNKNOWN',
+                    confidence=0.0,
+                    source='yfinance',
+                    error='Short interest metrics unavailable',
+                )
+
             # Calculate confidence
             confidence = 0.3
             if short_interest:
@@ -173,7 +190,8 @@ class ShortInterestAnalyzer:
             logger.warning(f"yfinance short interest fetch failed for {ticker}: {e}")
             return ShortInterestResult(
                 ticker=ticker,
-                confidence=0.1,
+                signal='UNAVAILABLE',
+                confidence=0.0,
                 source='yfinance',
                 error=str(e),
             )

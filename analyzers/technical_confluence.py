@@ -55,7 +55,11 @@ class TechnicalConfluenceAnalyzer(BaseAnalyzer):
                 confluence_score=50.0,
                 signals_bullish=[],
                 signals_bearish=[],
-                trend_alignment='UNKNOWN'
+                trend_alignment='UNKNOWN',
+                confidence=0.0,
+                status='unavailable',
+                data_quality='insufficient',
+                reason='At least 50 trading days of history are required',
             )
 
         close = history['Close']

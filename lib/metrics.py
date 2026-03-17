@@ -18,6 +18,8 @@ def setup_metrics(app):
     def log_request(response):
         if not hasattr(g, 'start_time'):
             return response
+        if response.headers.get('X-Response-Time'):
+            return response
         duration = (time.time() - g.start_time) * 1000
         logger.info(
             "request_completed path=%s method=%s status=%d duration_ms=%.2f",

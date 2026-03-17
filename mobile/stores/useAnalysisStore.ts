@@ -1,36 +1,40 @@
 import { create } from 'zustand';
-import { StockAnalysis, ScreenerResult } from '../lib/types';
-import { analyzeStock, screenStocks } from '../lib/api';
+import type { ScreenerResult, StockAnalysis } from '../lib/types';
 import { supabase, isSupabaseEnabled } from '../lib/supabase';
-
-type FilterType = 'all' | 'strong_buys' | 'buys' | 'holds' | 'sells' | 'strong_sells' | 'shorts';
+import { queryClient } from '../lib/queryClient';
+import { analysisQueryOptions, screenerQueryOptions, type ScreenerFilter } from '../lib/queryOptions';
+import { queryKeys } from '../lib/queryKeys';
 
 interface AnalysisState {
-  // Current analysis
   currentAnalysis: StockAnalysis | null;
+  currentTicker: string | null;
+  analysesByTicker: Record<string, StockAnalysis>;
   analysisHistory: StockAnalysis[];
-
-  // Screener
   screenerResults: ScreenerResult[];
-  currentFilter: FilterType;
-
-  // Loading states
+  currentFilter: ScreenerFilter;
   isAnalyzing: boolean;
   isScreening: boolean;
   error: string | null;
-
-  // Actions
   analyze: (ticker: string) => Promise<StockAnalysis | null>;
-  screen: (filter: FilterType, limit?: number) => Promise<void>;
-  setFilter: (filter: FilterType) => void;
+  screen: (filter: ScreenerFilter, limit?: number) => Promise<void>;
+  setFilter: (filter: ScreenerFilter) => void;
   clearAnalysis: () => void;
   clearError: () => void;
   subscribeToAnalysis: (ticker: string) => () => void;
 }
 
+function normalizeTicker(ticker: string) {
+  return ticker.trim().toUpperCase();
+}
+
+function mergeHistory(history: StockAnalysis[], analysis: StockAnalysis) {
+  return [analysis, ...history.filter((item) => item.ticker !== analysis.ticker)].slice(0, 10);
+}
+
 export const useAnalysisStore = create<AnalysisState>((set, get) => ({
-  // Initial state
   currentAnalysis: null,
+  currentTicker: null,
+  analysesByTicker: {},
   analysisHistory: [],
   screenerResults: [],
   currentFilter: 'all',
@@ -39,21 +43,24 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
   error: null,
 
   analyze: async (ticker: string) => {
-    if (get().isAnalyzing) return null;
+    const normalizedTicker = normalizeTicker(ticker);
+    if (!normalizedTicker || get().isAnalyzing) return null;
 
     set({ isAnalyzing: true, error: null });
 
     try {
-      const analysis = await analyzeStock(ticker);
+      const analysis = await queryClient.fetchQuery(analysisQueryOptions(normalizedTicker));
 
-      // Add to history (keep last 10)
-      const history = [analysis, ...get().analysisHistory.filter(a => a.ticker !== ticker)].slice(0, 10);
-
-      set({
+      set((state) => ({
         currentAnalysis: analysis,
-        analysisHistory: history,
+        currentTicker: normalizedTicker,
+        analysesByTicker: {
+          ...state.analysesByTicker,
+          [normalizedTicker]: analysis,
+        },
+        analysisHistory: mergeHistory(state.analysisHistory, analysis),
         isAnalyzing: false,
-      });
+      }));
 
       return analysis;
     } catch (error) {
@@ -65,17 +72,14 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
     }
   },
 
-  screen: async (filter: FilterType, limit: number = 20) => {
+  screen: async (filter: ScreenerFilter, limit: number = 20) => {
     if (get().isScreening) return;
 
     set({ isScreening: true, error: null, currentFilter: filter });
 
     try {
-      const results = await screenStocks(filter, limit);
-      set({
-        screenerResults: results,
-        isScreening: false,
-      });
+      const results = await queryClient.fetchQuery(screenerQueryOptions(filter, 'score', '', limit));
+      set({ screenerResults: results, isScreening: false });
     } catch (error) {
       set({
         isScreening: false,
@@ -84,46 +88,48 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
     }
   },
 
-  setFilter: (filter: FilterType) => {
-    // Reset screening state and immediately trigger new screen
+  setFilter: (filter: ScreenerFilter) => {
     set({ currentFilter: filter, isScreening: false });
-    get().screen(filter);
+    void get().screen(filter);
   },
 
-  clearAnalysis: () => set({ currentAnalysis: null }),
+  clearAnalysis: () => set({ currentAnalysis: null, currentTicker: null }),
 
   clearError: () => set({ error: null }),
 
   subscribeToAnalysis: (ticker: string) => {
     if (!isSupabaseEnabled) return () => {};
 
+    const normalizedTicker = normalizeTicker(ticker);
     const channel = supabase
-      .channel(`analysis-${ticker.toUpperCase()}`)
+      .channel(`analysis-${normalizedTicker}`)
       .on(
         'postgres_changes',
         {
           event: 'INSERT',
           schema: 'public',
           table: 'stock_analyses',
-          filter: `ticker=eq.${ticker.toUpperCase()}`,
+          filter: `ticker=eq.${normalizedTicker}`,
         },
-        (payload) => {
-          // Update current analysis if it matches the viewed ticker
-          const current = get().currentAnalysis;
-          if (current && current.ticker === ticker.toUpperCase()) {
-            const newData = payload.new as any;
-            set({
-              currentAnalysis: {
-                ...current,
-                investment_score: newData.investment_score,
-                technical_score: newData.technical_score,
-                fundamental_score: newData.fundamental_score,
-                current_price: newData.current_price,
-                recommendation: newData.recommendation,
-                timestamp: newData.timestamp,
-              },
+        () => {
+          void queryClient.fetchQuery(analysisQueryOptions(normalizedTicker)).then((analysis) => {
+            set((state) => {
+              if (state.currentTicker !== normalizedTicker && state.analysesByTicker[normalizedTicker] === analysis) {
+                return state;
+              }
+
+              return {
+                currentAnalysis: state.currentTicker === normalizedTicker ? analysis : state.currentAnalysis,
+                analysesByTicker: {
+                  ...state.analysesByTicker,
+                  [normalizedTicker]: analysis,
+                },
+                analysisHistory: mergeHistory(state.analysisHistory, analysis),
+              };
             });
-          }
+          }).catch(() => {
+            queryClient.invalidateQueries({ queryKey: queryKeys.analysis(normalizedTicker) });
+          });
         }
       )
       .subscribe();
@@ -133,3 +139,4 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
     };
   },
 }));
+

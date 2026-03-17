@@ -1,0 +1,67 @@
+{
+  "version": "2026-03-17",
+  "recommendation_thresholds": {
+    "equity": {
+      "strong_buy": 75,
+      "buy": 60,
+      "hold": 45,
+      "sell": 30
+    },
+    "etf": {
+      "strong_buy": 72,
+      "buy": 58,
+      "hold": 45,
+      "sell": 32
+    },
+    "index": {
+      "strong_buy": 72,
+      "buy": 58,
+      "hold": 45,
+      "sell": 32
+    },
+    "default": {
+      "strong_buy": 75,
+      "buy": 60,
+      "hold": 45,
+      "sell": 30
+    }
+  },
+  "confidence_thresholds": {
+    "high": 0.75,
+    "medium": 0.5
+  },
+  "adjustments": {
+    "quality_fail_cap": 40,
+    "strong_agreement_bonus": 15,
+    "moderate_agreement_bonus": 8,
+    "conflict_penalty": 10,
+    "major_conflict_penalty": 15,
+    "imminent_catalyst_uncertainty": 8,
+    "near_catalyst_uncertainty": 5,
+    "cluster_buying_bonus": 10,
+    "executive_buying_bonus": 5,
+    "heavy_selling_penalty": 5,
+    "squeeze_potential_bonus": 5,
+    "crowded_short_flag": 5,
+    "outperforming_bonus": 5,
+    "underperforming_penalty": 5
+  },
+  "instrument_weights": {
+    "equity": {
+      "technical_scale_divisor": 2.0,
+      "relative_strength_scale_divisor": 4.0
+    },
+    "etf": {
+      "technical_scale_divisor": 1.8,
+      "relative_strength_scale_divisor": 2.0
+    },
+    "index": {
+      "technical_scale_divisor": 1.8,
+      "relative_strength_scale_divisor": 2.0
+    },
+    "default": {
+      "technical_scale_divisor": 2.0,
+      "relative_strength_scale_divisor": 3.0
+    }
+  }
+}

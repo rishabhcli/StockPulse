@@ -1,4 +1,4 @@
-from flask import Flask, render_template, jsonify, request, send_from_directory, Response
+from flask import Flask, render_template, jsonify, request, send_from_directory, Response, g
 from flask_cors import CORS
 import yfinance as yf
 import pandas as pd
@@ -13,6 +13,15 @@ from collections import defaultdict
 import time
 import threading
 import logging
+import uuid
+
+from analyzers.score_combiner import ScoreCombiner
+from analyzers.market_regime import MarketRegimeAnalyzer
+from data.fetchers import (
+    get_all_stock_data as fetch_all_stock_data,
+    get_market_data as fetch_market_data,
+    classify_instrument as classify_fetched_instrument,
+)
 
 # Load environment variables
 try:
@@ -23,15 +32,23 @@ except ImportError:
 
 # Supabase database service
 from lib.db_service import db_service
-from lib.exceptions import StockPulseError, ValidationError
+from lib.exceptions import AuthenticationError, InsufficientDataError, StockPulseError, ValidationError
+from lib.backend_observability import (
+    build_freshness_metadata,
+    configure_json_logging,
+    configure_sentry,
+    get_request_id,
+    log_request,
+)
 
 # ============== FEATURE FLAGS ==============
 # v2 layered scoring is now the default
 USE_LAYERED_SCORING = os.environ.get('USE_LAYERED_SCORING', 'true').lower() == 'true'
 
 # Setup logging
-logging.basicConfig(level=logging.INFO)
+configure_json_logging()
 logger = logging.getLogger(__name__)
+configure_sentry()
 
 app = Flask(__name__, static_folder='static', static_url_path='')
 
@@ -43,13 +60,19 @@ setup_metrics(app)
 try:
     from flask_limiter import Limiter
     from flask_limiter.util import get_remote_address
+    limiter_storage_uri = os.environ.get('REDIS_URL')
+    if os.environ.get('FLASK_ENV', 'development').lower() == 'production' and not limiter_storage_uri:
+        raise RuntimeError("REDIS_URL is required when FLASK_ENV=production")
     limiter = Limiter(
         get_remote_address,
         app=app,
         default_limits=["60 per minute"],
-        storage_uri=os.environ.get('REDIS_URL', 'memory://'),
+        storage_uri=limiter_storage_uri or 'memory://',
     )
 except ImportError:
+    if os.environ.get('FLASK_ENV', 'development').lower() == 'production':
+        logger.critical("flask-limiter is required when FLASK_ENV=production")
+        raise
     # flask-limiter not installed; create a no-op decorator
     logger.warning("flask-limiter not installed — rate limiting disabled")
     class _NoOpLimiter:
@@ -60,6 +83,111 @@ except ImportError:
         def exempt(self, f):
             return f
     limiter = _NoOpLimiter()
+except RuntimeError as exc:
+    logger.critical(str(exc))
+    raise
+
+
+# ============== REQUEST CONTEXT / API ENVELOPES ==============
+def _now_iso():
+    return datetime.utcnow().isoformat()
+
+
+def _request_payload():
+    if request.is_json:
+        body = request.get_json(silent=True)
+        if isinstance(body, dict):
+            return body
+    return {}
+
+
+@app.before_request
+def _set_request_context():
+    g.request_id = request.headers.get('X-Request-ID') or uuid.uuid4().hex
+    g.request_started_at = time.time()
+
+
+@app.after_request
+def _add_request_metadata(response):
+    request_id = getattr(g, 'request_id', None) or get_request_id()
+    response.headers['X-Request-ID'] = request_id
+    if response.is_json:
+        try:
+            response_json = response.get_json(silent=True)
+            if isinstance(response_json, dict) and 'request_id' not in response_json:
+                response_json = dict(response_json)
+                response_json['request_id'] = request_id
+                response.set_data(json.dumps(response_json))
+        except Exception:
+            pass
+    if getattr(g, 'request_started_at', None) is not None:
+        duration_ms = (time.time() - g.request_started_at) * 1000
+        response.headers['X-Response-Time'] = f'{duration_ms:.2f}ms'
+        log_request(logger, response, duration_ms)
+    else:
+        log_request(logger, response, 0.0)
+    return response
+
+
+def _with_request_id(payload):
+    if isinstance(payload, dict) and 'request_id' not in payload:
+        payload = dict(payload)
+        payload['request_id'] = get_request_id()
+    return payload
+
+
+def _api_response(payload, status=200):
+    return jsonify(_with_request_id(payload)), status
+
+
+def _api_error(message, code, status=400, **extra):
+    payload = {'error': message, 'code': code}
+    payload.update(extra)
+    return _api_response(payload, status=status)
+
+
+def _summarize_sources(source_map):
+    summary = {'available': 0, 'unavailable': 0, 'stale': 0, 'groups': {}}
+    for group_name, group in (source_map or {}).items():
+        if isinstance(group, dict):
+            group_summary = {'available': 0, 'unavailable': 0, 'stale': 0}
+            for meta in group.values():
+                if not isinstance(meta, dict):
+                    continue
+                if meta.get('available'):
+                    summary['available'] += 1
+                    group_summary['available'] += 1
+                else:
+                    summary['unavailable'] += 1
+                    group_summary['unavailable'] += 1
+                if meta.get('stale'):
+                    summary['stale'] += 1
+                    group_summary['stale'] += 1
+            summary['groups'][group_name] = group_summary
+    return summary
+
+
+def _build_freshness_summary(*, sources_used=None, stale_inputs=None, generated_at=None, items=None, extra=None):
+    source_summary = _summarize_sources(sources_used)
+    item_count = len(items) if isinstance(items, list) else None
+    status = 'fresh'
+    if stale_inputs:
+        status = 'stale'
+    elif source_summary['unavailable'] or source_summary['stale']:
+        status = 'partial'
+    freshness = {
+        'status': status,
+        'summary': 'fresh data' if status == 'fresh' else 'partial or stale inputs present',
+        'generated_at': generated_at or _now_iso(),
+        'stale_inputs': stale_inputs or [],
+        'sources_used': sources_used or {},
+        'source_summary': source_summary,
+    }
+    if item_count is not None:
+        freshness['item_count'] = item_count
+    if extra:
+        freshness.update(extra)
+    return freshness
 
 
 # ============== INPUT VALIDATION ==============
@@ -1976,58 +2104,24 @@ def ensure_penny_section_minimums(stocks, min_per_category=3):
 
 
 def get_earnings_data(ticker):
-    """Get earnings and fundamental data (cached) - with fallback data"""
+    """Get real earnings and analyst target data without synthetic fallbacks."""
     # Check cache first
     cache_key = f"earnings_{ticker}"
     cached = _ticker_cache.get(cache_key)
     if cached is not None:
         return cached
 
-    today = datetime.now()
-
-    # Generate realistic earnings dates (quarters)
-    month = today.month
-    if month <= 3:
-        next_earnings_month = 4
-    elif month <= 6:
-        next_earnings_month = 7
-    elif month <= 9:
-        next_earnings_month = 10
-    else:
-        next_earnings_month = 1
-
-    next_year = today.year if next_earnings_month > month else today.year + 1
-    next_earnings = datetime(next_year, next_earnings_month, 15 + (hash(ticker) % 15))
-
-    # Generate mock earnings history based on ticker hash for consistency
-    ticker_hash = hash(ticker)
-    mock_earnings = []
-    for i in range(2):
-        q_month = ((today.month - 1 - (i * 3)) % 12) + 1
-        q_year = today.year if q_month <= today.month else today.year - 1
-        base_eps = 1.0 + (ticker_hash % 50) / 10  # 1.0 to 6.0
-        estimate = round(base_eps + (i * 0.1), 2)
-        actual = round(estimate * (1 + (((ticker_hash + i) % 20) - 10) / 100), 2)  # -10% to +10%
-        surprise = round(((actual - estimate) / estimate) * 100, 1) if estimate else 0
-
-        mock_earnings.append({
-            'date': f'{q_year}-{q_month:02d}-15',
-            'actual': actual,
-            'estimate': estimate,
-            'surprise': surprise
-        })
-
-    avg_surprise = round(sum(e['surprise'] for e in mock_earnings) / len(mock_earnings), 1) if mock_earnings else 0
-
     earnings_data = {
-        'earnings_date': next_earnings.strftime('%Y-%m-%d'),
-        'earnings_history': mock_earnings,
-        'earnings_surprise_avg': avg_surprise,
+        'available': False,
+        'source': 'yfinance',
+        'earnings_date': None,
+        'earnings_history': [],
+        'earnings_surprise_avg': None,
         'recommendation_trend': {},
-        'analyst_price_targets': {}
+        'analyst_price_targets': {},
+        'error': None,
     }
 
-    # Try to get real data from Yahoo Finance
     try:
         stock = yf.Ticker(ticker)
 
@@ -2035,7 +2129,8 @@ def get_earnings_data(ticker):
             calendar = stock.calendar
             if calendar is not None and not calendar.empty:
                 if 'Earnings Date' in calendar.index:
-                    earnings_data['earnings_date'] = str(calendar.loc['Earnings Date'].iloc[0])
+                    earnings_value = calendar.loc['Earnings Date'].iloc[0]
+                    earnings_data['earnings_date'] = str(earnings_value)[:10]
         except Exception:
             pass
 
@@ -2069,11 +2164,23 @@ def get_earnings_data(ticker):
                 'target_median': info.get('targetMedianPrice', 0) or 0,
                 'num_analysts': info.get('numberOfAnalystOpinions', 0) or 0
             }
+            if not earnings_data['earnings_date']:
+                for key in ('earningsTimestamp', 'earningsTimestampStart'):
+                    ts = info.get(key)
+                    if ts:
+                        earnings_data['earnings_date'] = datetime.fromtimestamp(ts).strftime('%Y-%m-%d')
+                        break
         except Exception:
             pass
 
     except Exception as e:
-        pass
+        earnings_data['error'] = str(e)
+
+    earnings_data['available'] = bool(
+        earnings_data['earnings_date']
+        or earnings_data['earnings_history']
+        or any(earnings_data['analyst_price_targets'].values())
+    )
 
     # Cache the result
     _ticker_cache.set(cache_key, earnings_data, ttl=3600)  # 1 hour cache for earnings
@@ -3325,6 +3432,747 @@ def _get_market_data_for_v2():
         return {'vix': 20.0}
 
 
+# ============== V3 CANONICAL ANALYSIS HELPERS ==============
+
+SCREENING_ETFS = [
+    'SPY', 'QQQ', 'IWM', 'DIA', 'VTI', 'VOO',
+    'XLK', 'XLF', 'XLE', 'XLV', 'XLY', 'XLI',
+    'XLP', 'XLU', 'XLC', 'XLB', 'XLRE', 'GLD', 'TLT',
+]
+
+
+def _unique_tickers(tickers):
+    seen = set()
+    result = []
+    for ticker in tickers:
+        if not ticker:
+            continue
+        normalized = normalize_ticker(str(ticker).strip().upper())
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+    return result
+
+
+def _source_meta(name, source, available, error=None, stale=False):
+    return {
+        'name': name,
+        'available': bool(available),
+        'source': source,
+        'fetched_at': datetime.utcnow().isoformat(),
+        'stale': stale,
+        'error': error,
+    }
+
+
+def _serialize_obj(value):
+    if value is None:
+        return None
+    if hasattr(value, 'to_dict'):
+        return value.to_dict()
+    return value
+
+
+def _extract_price_change(history):
+    if history is None or history.empty or len(history) < 2:
+        return (None, None)
+    current = float(history['Close'].iloc[-1])
+    previous = float(history['Close'].iloc[-2])
+    return (round(current - previous, 2), round(((current / previous) - 1) * 100, 2))
+
+
+def _extract_earnings_date(stock_data, earnings_data):
+    earnings_date = earnings_data.get('earnings_date')
+    if earnings_date:
+        return earnings_date
+
+    calendar = stock_data.get('calendar')
+    if calendar is None:
+        return None
+
+    try:
+        if isinstance(calendar, dict) and calendar.get('Earnings Date'):
+            value = calendar['Earnings Date']
+            if isinstance(value, list) and value:
+                value = value[0]
+            return str(value)[:10]
+        if hasattr(calendar, 'columns') and 'Earnings Date' in calendar.columns:
+            return str(calendar['Earnings Date'].iloc[0])[:10]
+        if hasattr(calendar, 'index') and 'Earnings Date' in calendar.index:
+            value = calendar.loc['Earnings Date']
+            if hasattr(value, 'iloc'):
+                value = value.iloc[0]
+            return str(value)[:10]
+    except Exception:
+        return None
+
+    return None
+
+
+def _build_earnings_payload(stock_data):
+    earnings_data = get_earnings_data(stock_data['ticker'])
+    earnings_date = _extract_earnings_date(stock_data, earnings_data)
+    days_until = None
+    if earnings_date:
+        try:
+            days_until = (datetime.strptime(earnings_date[:10], '%Y-%m-%d').date() - datetime.now().date()).days
+        except Exception:
+            days_until = None
+
+    return {
+        'status': 'available' if earnings_data.get('available') and earnings_date else 'unavailable',
+        'source': earnings_data.get('source', 'yfinance'),
+        'earnings_date': earnings_date,
+        'days_until': days_until,
+        'earnings_history': earnings_data.get('earnings_history', []),
+        'earnings_surprise_avg': earnings_data.get('earnings_surprise_avg'),
+        'analyst_price_targets': earnings_data.get('analyst_price_targets', {}),
+        'error': earnings_data.get('error'),
+    }
+
+
+def _has_real_short_interest(short_result):
+    if not short_result or getattr(short_result, 'error', None):
+        return False
+    return any(
+        getattr(short_result, field, None) is not None
+        for field in ('short_interest', 'short_percent_of_float', 'days_to_cover', 'data_date')
+    )
+
+
+def _has_real_insider_data(insider_result):
+    if not insider_result or getattr(insider_result, 'error', None):
+        return False
+    return getattr(insider_result, 'data_date', None) is not None
+
+
+def _fetch_extended_data_v3(ticker_symbol, stock_data):
+    """Fetch optional inputs and record source metadata without inventing neutral data."""
+    extended_sources = {}
+
+    try:
+        from data.insider_trading import get_insider_trading
+        insider_result = get_insider_trading(ticker_symbol)
+        stock_data['insider_trading'] = insider_result
+        extended_sources['insider_trading'] = _source_meta(
+            'insider_trading',
+            'sec_edgar/yfinance',
+            _has_real_insider_data(insider_result),
+            getattr(insider_result, 'error', None),
+        )
+    except Exception as exc:
+        stock_data['insider_trading'] = None
+        extended_sources['insider_trading'] = _source_meta('insider_trading', 'sec_edgar/yfinance', False, str(exc))
+
+    try:
+        from data.short_interest import get_short_interest
+        short_result = get_short_interest(ticker_symbol)
+        stock_data['short_interest'] = short_result
+        extended_sources['short_interest'] = _source_meta(
+            'short_interest',
+            getattr(short_result, 'source', 'yfinance'),
+            _has_real_short_interest(short_result),
+            getattr(short_result, 'error', None),
+        )
+    except Exception as exc:
+        stock_data['short_interest'] = None
+        extended_sources['short_interest'] = _source_meta('short_interest', 'yfinance', False, str(exc))
+
+    try:
+        from data.relative_strength import get_relative_strength
+        sector = stock_data.get('info', {}).get('sector', '')
+        rs_result = get_relative_strength(ticker_symbol, sector=sector, info=stock_data.get('info'))
+        stock_data['relative_strength'] = rs_result
+        extended_sources['relative_strength'] = _source_meta(
+            'relative_strength',
+            'stooq/yfinance',
+            rs_result is not None,
+            None,
+        )
+    except Exception as exc:
+        stock_data['relative_strength'] = None
+        extended_sources['relative_strength'] = _source_meta('relative_strength', 'stooq/yfinance', False, str(exc))
+
+    stock_sources = stock_data.setdefault('sources', {})
+    stock_sources.update(extended_sources)
+    stock_data['sources_checked'] = list(stock_sources.keys())
+    stock_data['missing_inputs'] = [name for name, meta in stock_sources.items() if not meta.get('available')]
+    return stock_data
+
+
+def _assess_v3_eligibility(stock_data):
+    """Apply hard-fail eligibility rules before scoring."""
+    history = stock_data.get('history')
+    instrument_type = stock_data.get('instrument_type') or classify_fetched_instrument(stock_data['ticker'], stock_data.get('info'))
+    reasons = []
+    missing_inputs = []
+
+    if stock_data.get('current_price') in (None, 0):
+        reasons.append('Current quote unavailable')
+        missing_inputs.append('quote')
+
+    history_len = 0 if history is None else len(history)
+    if history is None or history.empty or history_len < 252:
+        reasons.append('At least 252 trading days of price history are required')
+        missing_inputs.append('history')
+
+    if instrument_type not in {'equity', 'etf', 'index'}:
+        reasons.append('Instrument classification unavailable')
+        missing_inputs.append('instrument_type')
+
+    if instrument_type == 'equity':
+        if not stock_data.get('info'):
+            reasons.append('Company info unavailable')
+            missing_inputs.append('info')
+        financials = stock_data.get('financials') or {}
+        if not financials.get('data_available'):
+            reasons.append('Usable financial statements unavailable')
+            missing_inputs.append('financials')
+
+    return (
+        len(reasons) == 0,
+        instrument_type if instrument_type in {'equity', 'etf', 'index'} else 'unknown',
+        sorted(set(missing_inputs)),
+        '; '.join(reasons) if reasons else '',
+    )
+
+
+def _build_display_indicators(stock_data, conviction_result, market_data):
+    history = stock_data.get('history')
+    technical = conviction_result.layer_results.technical_confluence
+    price_change, change_pct = _extract_price_change(history)
+
+    return {
+        'current_price': round(float(stock_data.get('current_price') or 0), 2) if stock_data.get('current_price') is not None else None,
+        'price_change': price_change,
+        'price_change_pct': change_pct,
+        'rsi': technical.indicators.get('RSI') if technical and technical.indicators else None,
+        'sma_20': technical.indicators.get('SMA20') if technical and technical.indicators else None,
+        'sma_50': technical.indicators.get('SMA50') if technical and technical.indicators else None,
+        'sma_200': technical.indicators.get('SMA200') if technical and technical.indicators else None,
+        'trend_alignment': technical.trend_alignment if technical else None,
+        'vix': market_data.get('vix'),
+        'relative_strength': _serialize_obj(stock_data.get('relative_strength')),
+    }
+
+
+def _build_fundamentals(stock_data, conviction_result, instrument_type):
+    info = stock_data.get('info') or {}
+    if instrument_type != 'equity':
+        return {
+            'status': 'not_applicable',
+            'reason': 'Fundamental valuation is disabled for non-equities',
+        }
+
+    value_layer = conviction_result.layer_results.intrinsic_value
+    quality_layer = conviction_result.layer_results.quality_gate
+    return {
+        'status': 'available' if info else 'unavailable',
+        'market_cap': info.get('marketCap'),
+        'trailing_pe': info.get('trailingPE'),
+        'forward_pe': info.get('forwardPE'),
+        'peg_ratio': info.get('pegRatio'),
+        'price_to_book': info.get('priceToBook'),
+        'profit_margin': info.get('profitMargins'),
+        'revenue_growth': info.get('revenueGrowth'),
+        'debt_to_equity': info.get('debtToEquity'),
+        'return_on_equity': info.get('returnOnEquity'),
+        'valuation_signal': value_layer.valuation_signal,
+        'margin_of_safety': value_layer.margin_of_safety,
+        'fair_value_range': value_layer.fair_value_range,
+        'quality_gate': quality_layer.to_dict(),
+    }
+
+
+def _build_market_context(conviction_result, market_data):
+    regime = conviction_result.layer_results.market_regime
+    economic_context = _serialize_obj(market_data.get('economic_context'))
+    return {
+        'regime': regime.regime,
+        'spy_trend': regime.spy_trend,
+        'vix_level': regime.vix_level,
+        'vix_percentile': regime.vix_percentile,
+        'breadth': regime.breadth,
+        'confidence': regime.confidence,
+        'status': regime.status,
+        'data_quality': regime.data_quality,
+        'economic_context': economic_context,
+        'indexes': {
+            'spy': market_data.get('spy', {}),
+            'qqq': market_data.get('qqq', {}),
+            'iwm': market_data.get('iwm', {}),
+        },
+    }
+
+
+def _build_news_analysis(conviction_result):
+    catalyst = conviction_result.layer_results.catalyst
+    return {
+        'status': catalyst.status,
+        'data_quality': catalyst.data_quality,
+        'sentiment': catalyst.catalyst_sentiment,
+        'risk_factor': catalyst.risk_factor,
+        'news_sentiment_score': catalyst.news_sentiment_score,
+        'catalysts': [item.to_dict() for item in catalyst.catalysts],
+        'articles': [item.to_dict() for item in catalyst.analyzed_articles],
+        'nearest_catalyst': catalyst.nearest_catalyst.to_dict() if catalyst.nearest_catalyst else None,
+        'days_to_nearest': catalyst.days_to_nearest,
+        'reason': catalyst.reason,
+    }
+
+
+def _build_data_quality(stock_data, conviction_result):
+    layer_analysis = conviction_result.layer_results.to_dict()
+    applicable_layers = []
+    available_layers = []
+    for name, layer in layer_analysis.items():
+        if not layer or not layer.get('applicable', True):
+            continue
+        applicable_layers.append(name)
+        if layer.get('status') == 'available':
+            available_layers.append(name)
+
+    stock_sources = stock_data.get('sources', {})
+    missing_optional_inputs = [name for name, meta in stock_sources.items() if not meta.get('available')]
+
+    return {
+        'status': 'complete' if set(applicable_layers) == set(available_layers) and not missing_optional_inputs else 'partial',
+        'core_inputs_complete': True,
+        'applicable_layers': applicable_layers,
+        'available_layers': available_layers,
+        'missing_optional_inputs': missing_optional_inputs,
+    }
+
+
+def _build_unavailable_response(ticker, instrument_type, reason, missing_inputs, stock_data=None, market_data=None):
+    stock_sources = (stock_data or {}).get('sources', {})
+    market_sources = (market_data or {}).get('sources', {})
+    return {
+        'status': 'unavailable',
+        'code': 'insufficient_core_data',
+        'ticker': ticker,
+        'instrument_type': instrument_type,
+        'scoring_version': 'v3',
+        'reason': reason,
+        'missing_inputs': missing_inputs,
+        'sources_checked': {
+            'stock': stock_sources,
+            'market': market_sources,
+        },
+        'generated_at': datetime.utcnow().isoformat(),
+    }
+
+
+def _build_analysis_response(ticker, stock_data, market_data, conviction_result, calibration_version=None):
+    info = stock_data.get('info') or {}
+    instrument_type = stock_data.get('instrument_type') or 'unknown'
+    display_indicators = _build_display_indicators(stock_data, conviction_result, market_data)
+    data_quality = _build_data_quality(stock_data, conviction_result)
+    earnings = _build_earnings_payload(stock_data)
+
+    return {
+        'ticker': ticker,
+        'company_name': info.get('longName', info.get('shortName', ticker)),
+        'sector': info.get('sector'),
+        'industry': info.get('industry'),
+        'instrument_type': instrument_type,
+        'scoring_version': 'v3',
+        'calibration_version': calibration_version,
+        'score': conviction_result.score,
+        'recommendation': conviction_result.recommendation,
+        'action': conviction_result.action,
+        'confidence': conviction_result.confidence,
+        'agreement_level': conviction_result.agreement_level,
+        'explanation': conviction_result.explanation,
+        'layer_analysis': conviction_result.layer_results.to_dict(),
+        'data_quality': data_quality,
+        'sources_used': {
+            'stock': stock_data.get('sources', {}),
+            'market': market_data.get('sources', {}),
+        },
+        'missing_inputs': data_quality['missing_optional_inputs'],
+        'stale_inputs': stock_data.get('stale_inputs', []),
+        'display_indicators': display_indicators,
+        'fundamentals': _build_fundamentals(stock_data, conviction_result, instrument_type),
+        'market_context': _build_market_context(conviction_result, market_data),
+        'news_analysis': _build_news_analysis(conviction_result),
+        'earnings': earnings,
+        'current_price': display_indicators.get('current_price'),
+        'change_pct': display_indicators.get('price_change_pct'),
+        'dollar_change': display_indicators.get('price_change'),
+        'generated_at': datetime.utcnow().isoformat(),
+    }
+
+
+def analyze_stock_v3(ticker_symbol, stock_data=None, market_data=None, persist=False):
+    ticker_symbol = normalize_ticker(ticker_symbol)
+    logger.info(
+        'analysis_start',
+        extra={
+            'request_id': get_request_id(),
+            'ticker': ticker_symbol,
+            'stage': 'start',
+        },
+    )
+    stock_data = stock_data or fetch_all_stock_data(ticker_symbol)
+    stock_data = _fetch_extended_data_v3(ticker_symbol, stock_data)
+    market_data = market_data or fetch_market_data()
+    logger.info(
+        'analysis_sources_loaded',
+        extra={
+            'request_id': get_request_id(),
+            'ticker': ticker_symbol,
+            'stock_sources': _summarize_sources(stock_data.get('sources', {})),
+            'market_sources': _summarize_sources(market_data.get('sources', {})),
+        },
+    )
+
+    eligible, instrument_type, missing_inputs, reason = _assess_v3_eligibility(stock_data)
+    stock_data['instrument_type'] = instrument_type
+    if not eligible:
+        logger.info(
+            'analysis_unavailable',
+            extra={
+                'request_id': get_request_id(),
+                'ticker': ticker_symbol,
+                'instrument_type': instrument_type,
+                'missing_inputs': missing_inputs,
+                'reason': reason,
+            },
+        )
+        return _build_unavailable_response(
+            ticker_symbol,
+            instrument_type,
+            reason,
+            missing_inputs,
+            stock_data=stock_data,
+            market_data=market_data,
+        ), 422
+
+    combiner = ScoreCombiner()
+    conviction_result = combiner.calculate_conviction_score(ticker_symbol, stock_data, market_data)
+    response = _build_analysis_response(
+        ticker_symbol,
+        stock_data,
+        market_data,
+        conviction_result,
+        calibration_version=combiner.config.get('version'),
+    )
+    logger.info(
+        'analysis_complete',
+        extra={
+            'request_id': get_request_id(),
+            'ticker': ticker_symbol,
+            'score': response.get('score'),
+            'recommendation': response.get('recommendation'),
+            'confidence': response.get('confidence'),
+        },
+    )
+
+    if persist:
+        try:
+            db_service.save_stock_analysis(response)
+        except Exception as exc:
+            logger.debug(f"DB save failed for {ticker_symbol}: {exc}")
+
+        try:
+            from data.backtester import record_score
+            if response.get('current_price'):
+                record_score(
+                    ticker_symbol,
+                    float(response['score']),
+                    float(response['current_price']),
+                    recommendation=response.get('recommendation'),
+                    scoring_version='v3',
+                    instrument_type=response.get('instrument_type', 'equity'),
+                    benchmark_ticker='SPY',
+                    forward_horizons=[5, 20, 60],
+                    transaction_cost_bps=10.0,
+                    slippage_bps=5.0,
+                    metadata={
+                        'confidence': response.get('confidence'),
+                        'data_quality': response.get('data_quality', {}).get('status'),
+                        'calibration_version': response.get('calibration_version'),
+                    },
+                )
+        except Exception as exc:
+            logger.debug(f"Backtest record failed for {ticker_symbol}: {exc}")
+
+    return response, 200
+
+
+def get_dynamic_screening_universe(extra_tickers=None):
+    configured = os.environ.get('SCREENING_TICKERS', '')
+    configured_tickers = [ticker.strip() for ticker in configured.split(',') if ticker.strip()]
+    base_universe = configured_tickers
+    if not base_universe:
+        base_universe = []
+        for tickers in SECTOR_TICKERS.values():
+            base_universe.extend(tickers)
+        base_universe.extend(SCREENING_ETFS)
+    if extra_tickers:
+        base_universe.extend(extra_tickers)
+    return _unique_tickers(base_universe)
+
+
+def _passes_screening_liquidity(stock_data):
+    info = stock_data.get('info') or {}
+    history = stock_data.get('history')
+    instrument_type = stock_data.get('instrument_type')
+    current_price = stock_data.get('current_price') or 0
+
+    avg_volume = info.get('averageVolume') or info.get('averageDailyVolume10Day')
+    if not avg_volume and history is not None and not history.empty and 'Volume' in history.columns:
+        avg_volume = float(history['Volume'].tail(60).mean())
+
+    market_cap = info.get('marketCap')
+
+    if instrument_type == 'equity':
+        return bool(current_price >= 5 and (avg_volume or 0) >= 200000 and (market_cap or 0) >= 500_000_000)
+    if instrument_type == 'etf':
+        return bool(current_price > 0 and (avg_volume or 0) >= 100000)
+    if instrument_type == 'index':
+        return True
+    return False
+
+
+def _screen_result_from_analysis(analysis):
+    return {
+        'ticker': analysis['ticker'],
+        'company_name': analysis.get('company_name', analysis['ticker']),
+        'sector': analysis.get('sector'),
+        'industry': analysis.get('industry'),
+        'instrument_type': analysis.get('instrument_type'),
+        'score': analysis.get('score'),
+        'recommendation': analysis.get('recommendation'),
+        'confidence': analysis.get('confidence'),
+        'data_quality': analysis.get('data_quality'),
+        'current_price': analysis.get('current_price'),
+        'change_pct': analysis.get('change_pct'),
+        'display_indicators': analysis.get('display_indicators'),
+    }
+
+
+def screen_stocks_v3(filter_type='all', limit=20, tickers=None):
+    candidates = get_dynamic_screening_universe(tickers)
+    market_data = fetch_market_data()
+    eligible_results = []
+    excluded_reasons = defaultdict(int)
+
+    def analyze_candidate(ticker):
+        stock_data = fetch_all_stock_data(ticker)
+        if not _passes_screening_liquidity(stock_data):
+            return None, 'liquidity_filter'
+        analysis, status_code = analyze_stock_v3(ticker, stock_data=stock_data, market_data=market_data, persist=False)
+        if status_code != 200:
+            return None, analysis.get('reason', 'unavailable')
+        return analysis, None
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(analyze_candidate, ticker): ticker for ticker in candidates}
+        for future in as_completed(futures):
+            analysis, excluded_reason = future.result()
+            if analysis:
+                eligible_results.append(analysis)
+            elif excluded_reason:
+                excluded_reasons[excluded_reason] += 1
+
+    if filter_type == 'strong_buys':
+        filtered = [item for item in eligible_results if item['recommendation'] == 'STRONG BUY']
+        filtered.sort(key=lambda item: item['score'], reverse=True)
+    elif filter_type == 'buys':
+        filtered = [item for item in eligible_results if item['recommendation'] in {'STRONG BUY', 'BUY'}]
+        filtered.sort(key=lambda item: item['score'], reverse=True)
+    elif filter_type == 'strong_sells':
+        filtered = [item for item in eligible_results if item['recommendation'] == 'STRONG SELL']
+        filtered.sort(key=lambda item: item['score'])
+    elif filter_type == 'sells':
+        filtered = [item for item in eligible_results if item['recommendation'] in {'STRONG SELL', 'SELL'}]
+        filtered.sort(key=lambda item: item['score'])
+    elif filter_type == 'shorts':
+        filtered = [item for item in eligible_results if item['recommendation'] in {'STRONG SELL', 'SELL'}]
+        filtered.sort(key=lambda item: item['score'])
+    else:
+        filtered = sorted(eligible_results, key=lambda item: item['score'], reverse=True)
+
+    limited = filtered[:limit]
+    stale_inputs = sorted({
+        stale_input
+        for analysis in eligible_results
+        for stale_input in analysis.get('stale_inputs', [])
+    })
+    return {
+        'filter': filter_type,
+        'count': len(limited),
+        'eligible_count': len(eligible_results),
+        'excluded_count': sum(excluded_reasons.values()),
+        'excluded_reasons_summary': dict(excluded_reasons),
+        'stocks': [_screen_result_from_analysis(item) for item in limited],
+        'analyses': limited,
+        'freshness': build_freshness_metadata(
+            sources_used={'market': market_data.get('sources', {})},
+            stale_inputs=stale_inputs,
+            generated_at=_now_iso(),
+            details={
+                'analysis_count': len(eligible_results),
+                'eligible_count': len(eligible_results),
+                'excluded_count': sum(excluded_reasons.values()),
+            },
+        ),
+    }
+
+
+def get_market_indexes_v3():
+    indexes = [
+        {'symbol': '^GSPC', 'name': 'S&P 500', 'url': 'https://finance.yahoo.com/quote/%5EGSPC'},
+        {'symbol': '^DJI', 'name': 'DOW', 'url': 'https://finance.yahoo.com/quote/%5EDJI'},
+        {'symbol': '^IXIC', 'name': 'NASDAQ', 'url': 'https://finance.yahoo.com/quote/%5EIXIC'},
+        {'symbol': 'SPY', 'name': 'SPY', 'url': 'https://finance.yahoo.com/quote/SPY'},
+        {'symbol': 'QQQ', 'name': 'QQQ', 'url': 'https://finance.yahoo.com/quote/QQQ'},
+        {'symbol': 'IWM', 'name': 'IWM', 'url': 'https://finance.yahoo.com/quote/IWM'},
+    ]
+    results = []
+    for idx in indexes:
+        history = fetch_all_stock_data(idx['symbol']).get('history')
+        current_price = None
+        change = None
+        change_pct = None
+        if history is not None and not history.empty:
+            current_price = round(float(history['Close'].iloc[-1]), 2)
+            if len(history) >= 2:
+                previous = float(history['Close'].iloc[-2])
+                change = round(current_price - previous, 2)
+                change_pct = round(((current_price / previous) - 1) * 100, 2)
+        results.append({
+            'symbol': idx['symbol'],
+            'name': idx['name'],
+            'url': idx['url'],
+            'price': current_price,
+            'change': change,
+            'change_pct': change_pct,
+        })
+    return results
+
+
+def get_market_sentiment_v3():
+    market_data = fetch_market_data()
+    economic_context = _serialize_obj(market_data.get('economic_context')) or {}
+    vix = market_data.get('vix')
+    spy_change = market_data.get('spy', {}).get('change_1m')
+    qqq_change = market_data.get('qqq', {}).get('change_1m')
+    iwm_change = market_data.get('iwm', {}).get('change_1m')
+    breadth = market_data.get('breadth')
+    risk_proxies = market_data.get('risk_proxies', {})
+
+    regime_result = MarketRegimeAnalyzer().analyze(
+        data={
+            'market_data': market_data,
+            'economic_context': market_data.get('economic_context'),
+        }
+    )
+
+    return {
+        'vix': vix,
+        'signal': regime_result.regime if regime_result.status == 'available' else 'PARTIAL',
+        'regime': regime_result.regime,
+        'regime_status': regime_result.status,
+        'regime_confidence': regime_result.confidence,
+        'description': regime_result.description,
+        'breadth': breadth,
+        'risk_proxies': risk_proxies,
+        'spy_change_1m': spy_change,
+        'qqq_change_1m': qqq_change,
+        'iwm_change_1m': iwm_change,
+        'yield_curve': economic_context.get('yield_curve') if isinstance(economic_context, dict) else None,
+        'fed_stance': economic_context.get('fed_stance') if isinstance(economic_context, dict) else None,
+        'sources': market_data.get('sources', {}),
+        'generated_at': datetime.utcnow().isoformat(),
+    }
+
+
+def build_snapshot_v3(limit=5):
+    screened = screen_stocks_v3('all', 100)
+    analyses = screened.get('analyses', [])
+    market_sentiment = get_market_sentiment_v3()
+    by_change = sorted(
+        analyses,
+        key=lambda item: item.get('change_pct') if item.get('change_pct') is not None else -9999,
+        reverse=True,
+    )
+
+    return {
+        'timestamp': datetime.utcnow().isoformat(),
+        'market_sentiment': market_sentiment,
+        'market_indexes': get_market_indexes_v3(),
+        'strong_buys': [_screen_result_from_analysis(item) for item in sorted(analyses, key=lambda item: item['score'], reverse=True)[:limit]],
+        'shorts': [_screen_result_from_analysis(item) for item in sorted(analyses, key=lambda item: item['score'])[:limit]],
+        'gainers': [_screen_result_from_analysis(item) for item in by_change[:limit]],
+        'losers': [_screen_result_from_analysis(item) for item in list(reversed(by_change[-limit:]))],
+        'market_news': [],
+        'eligible_count': screened.get('eligible_count', 0),
+        'excluded_count': screened.get('excluded_count', 0),
+        'excluded_reasons_summary': screened.get('excluded_reasons_summary', {}),
+        'freshness': build_freshness_metadata(
+            sources_used={
+                'screen': screened.get('freshness', {}).get('sources_used', {}),
+                'market': market_sentiment.get('sources', {}),
+            },
+            stale_inputs=screened.get('freshness', {}).get('stale_inputs', []),
+            generated_at=_now_iso(),
+            details={
+                'analysis_count': screened.get('eligible_count', 0),
+                'included_count': len(analyses),
+            },
+        ),
+    }
+
+
+def get_live_earnings_calendar_v3(limit=50):
+    candidates = get_dynamic_screening_universe()
+    results = []
+    market_data = fetch_market_data()
+
+    for ticker in candidates:
+        stock_data = fetch_all_stock_data(ticker)
+        earnings = _build_earnings_payload(stock_data)
+        earnings_date = earnings.get('earnings_date')
+        if not earnings_date:
+            continue
+
+        try:
+            earnings_dt = datetime.strptime(earnings_date[:10], '%Y-%m-%d')
+        except ValueError:
+            continue
+
+        days_until = (earnings_dt.date() - datetime.now().date()).days
+        if days_until < 0 or days_until > 90:
+            continue
+
+        info = stock_data.get('info') or {}
+        analysis_result, status_code = analyze_stock_v3(ticker, stock_data=stock_data, market_data=market_data, persist=False)
+        results.append({
+            'ticker': ticker,
+            'company_name': info.get('longName', info.get('shortName', ticker)),
+            'sector': info.get('sector'),
+            'industry': info.get('industry'),
+            'current_price': round(float(stock_data.get('current_price') or 0), 2) if stock_data.get('current_price') is not None else None,
+            'earnings_date': earnings_date,
+            'days_until': days_until,
+            'earnings_history': earnings.get('earnings_history', []),
+            'prev_surprise_pct': earnings.get('earnings_surprise_avg'),
+            'analyst_price_targets': earnings.get('analyst_price_targets', {}),
+            'status': 'eligible' if status_code == 200 else 'unavailable',
+            'score': analysis_result.get('score') if status_code == 200 else None,
+            'recommendation': analysis_result.get('recommendation') if status_code == 200 else None,
+            'confidence': analysis_result.get('confidence') if status_code == 200 else None,
+            'data_quality': analysis_result.get('data_quality') if status_code == 200 else None,
+        })
+
+    results.sort(key=lambda item: (item['days_until'], item['ticker']))
+    return results[:limit]
+
+
 # API Routes
 @app.route('/')
 def index():
@@ -3350,43 +4198,31 @@ def service_worker():
 def analyze():
     data = request.json or {}
     ticker_raw = data.get('ticker', '')
-    scoring_version = data.get('scoring', request.args.get('scoring', 'auto'))
+    _ = data.get('scoring', request.args.get('scoring', 'auto'))
 
     ticker = validate_ticker(ticker_raw)
     if not ticker:
-        return jsonify({"error": "Invalid or missing ticker symbol"}), 400
+        return _api_error("Invalid or missing ticker symbol", code='invalid_input', status=400)
 
-    # Normalize ticker to handle index symbols (add ^ prefix if needed)
     ticker = normalize_ticker(ticker)
-
-    # Determine which scoring system to use
-    # 'v2' = force new layered system
-    # 'v1' = force original system
-    # 'auto' = use feature flag
-    if scoring_version == 'v2' or (scoring_version == 'auto' and USE_LAYERED_SCORING):
-        result = calculate_investment_score_v2(ticker)
-    else:
-        result = calculate_investment_score(ticker)
-        result['scoring_version'] = 'v1'
-
-    return jsonify(result)
+    result, status_code = analyze_stock_v3(ticker, persist=True)
+    return _api_response(result, status_code)
 
 @app.route('/api/screen', methods=['GET'])
 @limiter.limit("5 per minute")
 def screen():
     filter_type = request.args.get('filter', 'all')
     limit = safe_int(request.args.get('limit', 20), default=20, min_val=1, max_val=100)
+    raw_tickers = request.args.get('tickers', '')
+    tickers = [ticker.strip().upper() for ticker in raw_tickers.split(',') if ticker.strip()] if raw_tickers else None
 
-    results = screen_stocks(filter_type, limit)
-    return jsonify({
-        'filter': filter_type,
-        'count': len(results),
-        'stocks': results
-    })
+    results = screen_stocks_v3(filter_type, limit, tickers=tickers)
+    results.pop('analyses', None)
+    return _api_response(results)
 
 @app.route('/api/market-sentiment', methods=['GET'])
 def sentiment():
-    return jsonify(get_market_sentiment())
+    return _api_response(get_market_sentiment_v3())
 
 
 @app.route('/api/reddit-sentiment', methods=['GET'])
@@ -3406,7 +4242,7 @@ def reddit_sentiment():
     time_filter = request.args.get('time', 'week')
 
     if not ticker:
-        return jsonify({"error": "Invalid or missing ticker parameter"}), 400
+        return _api_error("Invalid or missing ticker parameter", code='invalid_input', status=400)
 
     if time_filter not in ['day', 'week', 'month']:
         time_filter = 'week'
@@ -3414,12 +4250,12 @@ def reddit_sentiment():
     try:
         from data.reddit_sentiment import get_reddit_sentiment
         result = get_reddit_sentiment(ticker, time_filter)
-        return jsonify(result.to_dict())
+        return _api_response(result.to_dict())
     except ImportError:
-        return jsonify({"error": "Reddit sentiment module not available"}), 500
+        return _api_error("Reddit sentiment module not available", code='backend_error', status=500)
     except Exception as e:
         logger.error(f"Reddit sentiment error: {e}")
-        return jsonify({"error": "An internal error occurred"}), 500
+        return _api_error("An internal error occurred", code='backend_error', status=500)
 
 
 @app.route('/api/insider-trading', methods=['GET'])
@@ -3429,17 +4265,17 @@ def get_insider_trading_api():
     days = safe_int(request.args.get('days', 90), default=90, min_val=1, max_val=365)
 
     if not ticker:
-        return jsonify({"error": "Invalid or missing ticker parameter"}), 400
+        return _api_error("Invalid or missing ticker parameter", code='invalid_input', status=400)
 
     try:
         from data.insider_trading import get_insider_trading
         result = get_insider_trading(ticker, days=days)
-        return jsonify(result.to_dict())
+        return _api_response(result.to_dict())
     except ImportError:
-        return jsonify({"error": "Insider trading module not available"}), 500
+        return _api_error("Insider trading module not available", code='backend_error', status=500)
     except Exception as e:
         logger.error(f"Insider trading error: {e}")
-        return jsonify({"error": "An internal error occurred"}), 500
+        return _api_error("An internal error occurred", code='backend_error', status=500)
 
 
 @app.route('/api/short-interest', methods=['GET'])
@@ -3448,17 +4284,17 @@ def get_short_interest_api():
     ticker = validate_ticker(request.args.get('ticker', ''))
 
     if not ticker:
-        return jsonify({"error": "Invalid or missing ticker parameter"}), 400
+        return _api_error("Invalid or missing ticker parameter", code='invalid_input', status=400)
 
     try:
         from data.short_interest import get_short_interest
         result = get_short_interest(ticker)
-        return jsonify(result.to_dict())
+        return _api_response(result.to_dict())
     except ImportError:
-        return jsonify({"error": "Short interest module not available"}), 500
+        return _api_error("Short interest module not available", code='backend_error', status=500)
     except Exception as e:
         logger.error(f"Short interest error: {e}")
-        return jsonify({"error": "An internal error occurred"}), 500
+        return _api_error("An internal error occurred", code='backend_error', status=500)
 
 
 @app.route('/api/relative-strength', methods=['GET'])
@@ -3467,7 +4303,7 @@ def get_relative_strength_api():
     ticker = validate_ticker(request.args.get('ticker', ''))
 
     if not ticker:
-        return jsonify({"error": "Invalid or missing ticker parameter"}), 400
+        return _api_error("Invalid or missing ticker parameter", code='invalid_input', status=400)
 
     try:
         from data.relative_strength import get_relative_strength
@@ -3480,12 +4316,12 @@ def get_relative_strength_api():
             pass
 
         result = get_relative_strength(ticker, info=info)
-        return jsonify(result.to_dict())
+        return _api_response(result.to_dict())
     except ImportError:
-        return jsonify({"error": "Relative strength module not available"}), 500
+        return _api_error("Relative strength module not available", code='backend_error', status=500)
     except Exception as e:
         logger.error(f"Relative strength error: {e}")
-        return jsonify({"error": "An internal error occurred"}), 500
+        return _api_error("An internal error occurred", code='backend_error', status=500)
 
 
 @app.route('/api/economic-context', methods=['GET'])
@@ -3494,12 +4330,12 @@ def get_economic_context_api():
     try:
         from data.economic_calendar import get_economic_context
         result = get_economic_context()
-        return jsonify(result.to_dict())
+        return _api_response(result.to_dict())
     except ImportError:
-        return jsonify({"error": "Economic calendar module not available"}), 500
+        return _api_error("Economic calendar module not available", code='backend_error', status=500)
     except Exception as e:
         logger.error(f"Economic context error: {e}")
-        return jsonify({"error": "An internal error occurred"}), 500
+        return _api_error("An internal error occurred", code='backend_error', status=500)
 
 
 @app.route('/api/backtest', methods=['GET'])
@@ -3513,12 +4349,12 @@ def get_backtest_api():
     try:
         from data.backtester import get_performance_report
         result = get_performance_report(period)
-        return jsonify(result.to_dict())
+        return _api_response(result.to_dict())
     except ImportError:
-        return jsonify({"error": "Backtester module not available"}), 500
+        return _api_error("Backtester module not available", code='backend_error', status=500)
     except Exception as e:
         logger.error(f"Backtest error: {e}")
-        return jsonify({"error": "An internal error occurred"}), 500
+        return _api_error("An internal error occurred", code='backend_error', status=500)
 
 
 @app.route('/api/backtest/record', methods=['POST'])
@@ -3530,17 +4366,29 @@ def record_score_api():
     price = data.get('price')
 
     if not ticker or score is None or price is None:
-        return jsonify({"error": "Please provide ticker, score, and price"}), 400
+        return _api_error("Please provide ticker, score, and price", code='invalid_input', status=400)
 
     try:
         from data.backtester import record_score
-        result = record_score(ticker, float(score), float(price))
-        return jsonify(result.to_dict())
+        result = record_score(
+            ticker,
+            float(score),
+            float(price),
+            recommendation=data.get('recommendation'),
+            scoring_version=data.get('scoring_version', 'v3'),
+            instrument_type=data.get('instrument_type', 'equity'),
+            benchmark_ticker=data.get('benchmark_ticker', 'SPY'),
+            forward_horizons=data.get('forward_horizons', [5, 20, 60]),
+            transaction_cost_bps=float(data.get('transaction_cost_bps', 10.0)),
+            slippage_bps=float(data.get('slippage_bps', 5.0)),
+            metadata=data.get('metadata', {}),
+        )
+        return _api_response(result.to_dict())
     except ImportError:
-        return jsonify({"error": "Backtester module not available"}), 500
+        return _api_error("Backtester module not available", code='backend_error', status=500)
     except Exception as e:
         logger.error(f"Record score error: {e}")
-        return jsonify({"error": "An internal error occurred"}), 500
+        return _api_error("An internal error occurred", code='backend_error', status=500)
 
 
 @app.route('/api/speak', methods=['POST'])
@@ -3548,13 +4396,13 @@ def record_score_api():
 def speak():
     """Generate speech using ElevenLabs API"""
     if not ELEVENLABS_API_KEY:
-        return jsonify({"error": "ElevenLabs API key not configured"}), 400
+        return _api_error("ElevenLabs API key not configured", code='invalid_input', status=400)
 
     data = request.json
     text = data.get('text', '')
 
     if not text:
-        return jsonify({"error": "No text provided"}), 400
+        return _api_error("No text provided", code='invalid_input', status=400)
 
     try:
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
@@ -3581,10 +4429,10 @@ def speak():
                 headers={"Content-Disposition": "inline; filename=speech.mp3"}
             )
         else:
-            return jsonify({"error": "Failed to generate speech"}), 500
+            return _api_error("Failed to generate speech", code='backend_error', status=500)
 
     except Exception as e:
-        return jsonify({"error": "An internal error occurred"}), 500
+        return _api_error("An internal error occurred", code='backend_error', status=500)
 
 def get_quick_stock_data(symbols):
     """Get quick stock data with fallback support"""
@@ -3671,87 +4519,77 @@ def get_fast_market_sentiment():
 
 @app.route('/api/snapshot', methods=['GET'])
 def snapshot():
-    """Market snapshot - fast loading with Stooq data"""
     try:
-        # All stocks to fetch
-        all_stocks = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'JPM', 'V', 'UNH',
-                      'INTC', 'VZ', 'IBM', 'T', 'F', 'GM', 'WBA', 'PFE', 'BMY', 'CVS',
-                      'BA', 'DIS', 'NFLX', 'AMD', 'CRM', 'ORCL', 'CSCO', 'ADBE', 'PYPL', 'XYZ']
-
-        # Fetch all data in parallel
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            indexes_future = executor.submit(get_market_indexes)
-            sentiment_future = executor.submit(get_fast_market_sentiment)
-            screen_future = executor.submit(screen_stocks, 'all', 100, all_stocks)
-
-        market_indexes = indexes_future.result(timeout=20)
-        market_sentiment = sentiment_future.result(timeout=20)
-        all_screened_data = screen_future.result(timeout=60)
-
-        # Sort for gainers (highest change) and losers (lowest change)
-        sorted_by_change = sorted(all_screened_data, key=lambda x: x.get('change_pct', 0), reverse=True)
-
-        gainers = sorted_by_change[:5]
-        losers = sorted_by_change[-5:][::-1]  # Reverse to show worst first
-
-        # Top rated (always show top 5 by score)
-        strong_buys = sorted(all_screened_data, key=lambda x: x['score'], reverse=True)[:5]
-
-        # Lowest rated (always show bottom 5 by score)
-        shorts = sorted(all_screened_data, key=lambda x: x['score'])[:5]
-
-        return jsonify({
-            'timestamp': datetime.now().isoformat(),
-            'market_sentiment': market_sentiment,
-            'market_indexes': market_indexes,
-            'strong_buys': strong_buys,
-            'shorts': shorts,
-            'gainers': gainers[:5],
-            'losers': losers[:5],
-            'market_news': []
-        })
+        return _api_response(build_snapshot_v3())
     except Exception as e:
-        return jsonify({
-            'timestamp': datetime.now().isoformat(),
+        return _api_response({
+            'status': 'error',
+            'code': 'backend_error',
             'error': str(e),
+            'timestamp': _now_iso(),
             'market_sentiment': {},
             'market_indexes': [],
             'strong_buys': [],
             'shorts': [],
             'gainers': [],
             'losers': [],
-            'market_news': []
-        })
+            'market_news': [],
+            'freshness': build_freshness_metadata(
+                sources_used={},
+                generated_at=_now_iso(),
+                stale_inputs=[],
+                details={'item_count': 0},
+            ),
+        }, status=500)
 
 
 @app.route('/api/market-indexes', methods=['GET'])
 def market_indexes():
     """Get major market index performance"""
-    return jsonify({
-        'indexes': get_market_indexes(),
-        'timestamp': datetime.now().isoformat()
-    })
+    indexes_payload = {
+        'indexes': get_market_indexes_v3(),
+        'timestamp': datetime.utcnow().isoformat(),
+        'freshness': build_freshness_metadata(
+            sources_used={'market': fetch_market_data().get('sources', {})},
+            generated_at=_now_iso(),
+            details={'item_count': 6},
+        ),
+    }
+    return _api_response(indexes_payload)
 
 
 @app.route('/api/earnings-calendar', methods=['GET'])
 def earnings_calendar():
-    """Get stocks with upcoming earnings - uses real yfinance data"""
     try:
-        # Use the existing function that fetches real earnings data
-        earnings_data = get_earnings_calendar()
-        
-        return jsonify({
+        limit = safe_int(request.args.get('limit', 50), default=50, min_val=1, max_val=100)
+        earnings_data = get_live_earnings_calendar_v3(limit=limit)
+        freshness = build_freshness_metadata(
+            sources_used={'calendar': {'earnings': {'available': bool(earnings_data)}}},
+            generated_at=_now_iso(),
+            items=earnings_data,
+            details={'item_count': len(earnings_data)},
+        )
+        return _api_response({
             'earnings': earnings_data,
             'count': len(earnings_data),
-            'timestamp': datetime.now().isoformat()
+            'timestamp': _now_iso(),
+            'freshness': freshness,
         })
     except Exception as e:
-        return jsonify({
+        return _api_response({
+            'status': 'error',
+            'code': 'backend_error',
+            'error': str(e),
             'earnings': [],
             'count': 0,
-            'error': str(e),
-            'timestamp': datetime.now().isoformat()
-        })
+            'timestamp': _now_iso(),
+            'freshness': build_freshness_metadata(
+                sources_used={'calendar': {'earnings': {'available': False}}},
+                generated_at=_now_iso(),
+                items=[],
+                details={'item_count': 0},
+            ),
+        }, status=500)
 
 
 @app.route('/api/penny-stocks', methods=['GET'])
@@ -3977,7 +4815,7 @@ def penny_stocks():
         else:
             results[cat].sort(key=lambda x: x.get('score', 100))
 
-    return jsonify({
+    return _api_response({
         'buy': results['buy'][:5],
         'hold': results['hold'][:5],
         'sell': results['sell'][:5],
@@ -3997,7 +4835,7 @@ def stock_chart(ticker):
         hist = get_cached_history(ticker_normalized, period="6mo")
 
         if hist.empty:
-            return jsonify({'error': 'No data available for this ticker'}), 404
+            return _api_error('No data available for this ticker', code='invalid_input', status=404)
 
         candles = [{
             'date': idx.strftime('%Y-%m-%d'),
@@ -4014,7 +4852,7 @@ def stock_chart(ticker):
         )
         price_trend, trend_description = CandlestickAnalyzer.identify_trend(hist['Close'])
 
-        return jsonify({
+        return _api_response({
             'ticker': ticker_normalized,
             'company_name': info.get('longName', ticker_normalized),
             'sector': info.get('sector', 'N/A'),
@@ -4036,7 +4874,7 @@ def stock_chart(ticker):
             }
         })
     except Exception as e:
-        return jsonify({'error': 'An internal error occurred'}), 500
+        return _api_error('An internal error occurred', code='backend_error', status=500)
 
 @app.route('/stock/<ticker>')
 def stock_page(ticker):
@@ -4050,7 +4888,7 @@ def stock_page(ticker):
 def clear_cache_endpoint():
     """Clear all cached data to force fresh API calls"""
     clear_cache()
-    return jsonify({"status": "success", "message": "Cache cleared"})
+    return _api_response({"status": "success", "message": "Cache cleared"})
 
 
 # ============== JWT AUTH HELPER ==============
@@ -4091,7 +4929,7 @@ def require_auth(f):
     def decorated(*args, **kwargs):
         user_id = get_user_id_from_request()
         if not user_id:
-            return jsonify({'error': 'Authentication required'}), 401
+            return _api_error('Authentication required', code='invalid_input', status=401)
         request.user_id = user_id
         return f(*args, **kwargs)
     return decorated
@@ -4107,7 +4945,7 @@ def trading_sim_status():
     status = trading_sim.get_status()
     status['market_open'] = market_open
     status['market_status'] = market_status
-    return jsonify(status)
+    return _api_response(status)
 
 
 @app.route('/api/trading-sim/history', methods=['GET'])
@@ -4135,7 +4973,7 @@ def trading_sim_history():
             'positions_value': point.get('positions_value', 0)
         })
 
-    return jsonify({
+    return _api_response({
         'history': chart_data,
         'initial_capital': initial_capital,
         'spy_start_price': spy_start,
@@ -4150,7 +4988,7 @@ def trading_sim_trades():
     limit = min(request.args.get('limit', 50, type=int), 200)
     trades = trading_sim.trade_log[-limit:]  # Get most recent trades
     trades.reverse()  # Most recent first
-    return jsonify({
+    return _api_response({
         'trades': trades,
         'total_trades': len(trading_sim.trade_log),
         'returned': len(trades)
@@ -4169,7 +5007,7 @@ def trading_sim_execute():
     executed_trades = make_trading_decisions()
     status = trading_sim.get_status()
 
-    return jsonify({
+    return _api_response({
         'executed_trades': executed_trades,
         'trades_count': len(executed_trades),
         'market_open': market_open,
@@ -4184,7 +5022,7 @@ def trading_sim_execute():
 def trading_sim_reset():
     """Reset simulation to $100,000 starting capital"""
     trading_sim.reset()
-    return jsonify({
+    return _api_response({
         'status': 'success',
         'message': 'Trading simulation reset to $100,000',
         'portfolio_status': trading_sim.get_status()
@@ -4198,26 +5036,26 @@ def trading_sim_manual_trade():
     """Execute a manual (human-initiated) trade that overrides AI control"""
     data = request.get_json()
     if not data:
-        return jsonify({'error': 'Request body required'}), 400
+        return _api_error('Request body required', code='invalid_input', status=400)
 
     trade_type = data.get('type')  # buy, sell, short, cover
     ticker = data.get('ticker', '').upper()
 
     if trade_type not in ('buy', 'sell', 'short', 'cover'):
-        return jsonify({'error': 'Invalid trade type. Must be: buy, sell, short, cover'}), 400
+        return _api_error('Invalid trade type. Must be: buy, sell, short, cover', code='invalid_input', status=400)
 
     try:
         quantity = int(data.get('quantity', 0))
     except (ValueError, TypeError):
-        return jsonify({'error': 'Quantity must be a positive integer'}), 400
+        return _api_error('Quantity must be a positive integer', code='invalid_input', status=400)
 
     if not ticker or quantity <= 0 or quantity > 100000:
-        return jsonify({'error': 'Missing or invalid fields: ticker required, quantity must be 1-100000'}), 400
+        return _api_error('Missing or invalid fields: ticker required, quantity must be 1-100000', code='invalid_input', status=400)
 
     # Get current price
     price = trading_sim.get_current_price(ticker)
     if not price:
-        return jsonify({'error': f'Could not get price for {ticker}'}), 400
+        return _api_error(f'Could not get price for {ticker}', code='upstream_data_unavailable', status=400)
 
     # Determine side based on trade type
     side = 'short' if trade_type in ['short', 'cover'] else 'long'
@@ -4233,7 +5071,7 @@ def trading_sim_manual_trade():
     # Record portfolio snapshot after manual trade
     trading_sim.record_portfolio_snapshot()
 
-    return jsonify({
+    return _api_response({
         'status': 'success' if trade.get('status') == 'executed' else 'failed',
         'trade': trade,
         'portfolio_status': trading_sim.get_status()
@@ -4248,10 +5086,10 @@ def trading_sim_close_position():
     ticker = data.get('ticker', '').upper()
 
     if not ticker:
-        return jsonify({'error': 'Missing ticker'}), 400
+        return _api_error('Missing ticker', code='invalid_input', status=400)
 
     if ticker not in trading_sim.positions:
-        return jsonify({'error': f'No position in {ticker}'}), 400
+        return _api_error(f'No position in {ticker}', code='invalid_input', status=400)
 
     pos = trading_sim.positions[ticker]
     quantity = pos['quantity']
@@ -4260,7 +5098,7 @@ def trading_sim_close_position():
     # Get current price
     price = trading_sim.get_current_price(ticker)
     if not price:
-        return jsonify({'error': f'Could not get price for {ticker}'}), 400
+        return _api_error(f'Could not get price for {ticker}', code='upstream_data_unavailable', status=400)
 
     # Determine trade type based on position side
     trade_type = 'sell' if side == 'long' else 'cover'
@@ -4274,7 +5112,7 @@ def trading_sim_close_position():
     # Record portfolio snapshot
     trading_sim.record_portfolio_snapshot()
 
-    return jsonify({
+    return _api_response({
         'status': 'success' if trade.get('status') == 'executed' else 'failed',
         'trade': trade,
         'portfolio_status': trading_sim.get_status()
@@ -4291,7 +5129,7 @@ def get_analysis_history(ticker):
     """Get historical analyses for a ticker from Supabase."""
     limit = min(request.args.get('limit', 30, type=int), 200)
     history = db_service.get_analysis_history(ticker.upper(), limit)
-    return jsonify({'ticker': ticker.upper(), 'history': history, 'count': len(history)})
+    return _api_response({'ticker': ticker.upper(), 'history': history, 'count': len(history)})
 
 
 @app.route('/api/analysis/latest/<ticker>', methods=['GET'])
@@ -4299,8 +5137,8 @@ def get_latest_analysis(ticker):
     """Get most recent analysis for a ticker from Supabase."""
     analysis = db_service.get_latest_analysis(ticker.upper())
     if analysis:
-        return jsonify(analysis)
-    return jsonify({'error': f'No analysis found for {ticker.upper()}'}), 404
+        return _api_response(analysis)
+    return _api_error(f'No analysis found for {ticker.upper()}', code='invalid_input', status=404)
 
 
 @app.after_request
@@ -4326,42 +5164,152 @@ def set_security_headers(response):
 @app.route('/health')
 @limiter.exempt
 def health():
-    return jsonify({
+    return _api_response({
         "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": _now_iso(),
         "supabase_enabled": db_service.enabled,
     })
+
+
+@app.route('/ready')
+@limiter.exempt
+def ready():
+    scorer_config = _check_scorer_config()
+    cache_backend = _check_cache_backend()
+    supabase_backend = _check_supabase_backend()
+    ready_status = scorer_config['ok'] and cache_backend['ok'] and supabase_backend['ok']
+    payload = {
+        'status': 'ready' if ready_status else 'unready',
+        'ready': ready_status,
+        'timestamp': _now_iso(),
+        'checks': {
+            'scorer_config': scorer_config,
+            'cache_backend': cache_backend,
+            'supabase': supabase_backend,
+        },
+    }
+    return _api_response(payload, status=200 if ready_status else 503)
 
 
 @app.route('/health/cache')
 @limiter.exempt
 def cache_health():
     """Return cache statistics for monitoring."""
-    return jsonify(_ticker_cache.get_stats())
+    return _api_response({
+        'status': 'healthy',
+        'timestamp': _now_iso(),
+        'cache': _ticker_cache.get_stats(),
+    })
+
+
+def _error_code_for_exception(exc):
+    if isinstance(exc, ValidationError):
+        return 'invalid_input'
+    if isinstance(exc, InsufficientDataError):
+        return 'insufficient_core_data'
+    if isinstance(exc, AuthenticationError):
+        return 'invalid_input'
+    if isinstance(exc, StockPulseError):
+        return 'backend_error'
+    return 'backend_error'
+
+
+def _check_scorer_config():
+    config_path = os.environ.get('STOCKPULSE_SCORING_CONFIG', ScoreCombiner.DEFAULT_CONFIG_PATH)
+    try:
+        with open(config_path, 'r', encoding='utf-8') as config_file:
+            config = json.load(config_file)
+        version = config.get('version')
+        return {
+            'ok': bool(version),
+            'path': config_path,
+            'version': version,
+            'error': None if version else 'Missing scoring config version',
+        }
+    except Exception as exc:
+        return {
+            'ok': False,
+            'path': config_path,
+            'version': None,
+            'error': str(exc),
+        }
+
+
+def _check_cache_backend():
+    try:
+        cache_key = f'ready_check_{uuid.uuid4().hex}'
+        _ticker_cache.set(cache_key, {'ok': True}, ttl=5)
+        value = _ticker_cache.get(cache_key)
+        _ticker_cache.delete(cache_key)
+        return {
+            'ok': bool(value and value.get('ok') is True),
+            'size': len(_ticker_cache),
+            'error': None if value else 'Cache read/write check failed',
+        }
+    except Exception as exc:
+        return {
+            'ok': False,
+            'size': None,
+            'error': str(exc),
+        }
+
+
+def _check_supabase_backend():
+    try:
+        if not db_service.enabled:
+            return {
+                'ok': False,
+                'enabled': False,
+                'error': 'Supabase not configured',
+            }
+
+        client = db_service.supabase
+        client.table('stock_analyses').select('id').limit(1).execute()
+        return {
+            'ok': True,
+            'enabled': True,
+            'error': None,
+        }
+    except Exception as exc:
+        return {
+            'ok': False,
+            'enabled': db_service.enabled,
+            'error': str(exc),
+        }
 
 
 # ============== GLOBAL ERROR HANDLERS ==============
 
 @app.errorhandler(StockPulseError)
 def handle_stockpulse_error(e):
-    return jsonify({"error": e.message, "type": e.__class__.__name__}), e.status_code
+    code = _error_code_for_exception(e)
+    return _api_error(
+        e.message,
+        code=code,
+        status=e.status_code,
+        type=e.__class__.__name__,
+    )
 
 
 @app.errorhandler(429)
 def handle_rate_limit(e):
-    return jsonify({"error": "Rate limit exceeded. Please try again later."}), 429
+    return _api_error(
+        "Rate limit exceeded. Please try again later.",
+        code='rate_limited',
+        status=429,
+    )
 
 
 @app.errorhandler(500)
 def handle_500(e):
-    logger.exception("Internal server error")
-    return jsonify({"error": "Internal server error"}), 500
+    logger.exception("Internal server error", extra={'request_id': get_request_id()})
+    return _api_error("Internal server error", code='backend_error', status=500)
 
 
 @app.errorhandler(404)
 def not_found(e):
     if request.path.startswith('/api/'):
-        return jsonify({"error": "Endpoint not found"}), 404
+        return _api_error("Endpoint not found", code='invalid_input', status=404)
     return send_from_directory(app.static_folder, 'index.html')
 
 if __name__ == '__main__':

@@ -1,9 +1,9 @@
 import { create } from 'zustand';
-import { MarketSnapshot, MarketSentiment, ScreenerResult, IndexData, PennyStock } from '../lib/types';
-import { getMarketSnapshot, getMarketSentiment, screenStocks } from '../lib/api';
+import type { IndexData, MarketSentiment, PennyStock, ScreenerResult } from '../lib/types';
+import { queryClient } from '../lib/queryClient';
+import { snapshotQueryOptions } from '../lib/queryOptions';
 
 interface MarketState {
-  // Data
   sentiment: MarketSentiment | null;
   topPicks: ScreenerResult[];
   gainers: ScreenerResult[];
@@ -11,20 +11,27 @@ interface MarketState {
   shorts: ScreenerResult[];
   indices: IndexData[];
   pennyStocks: PennyStock[];
-
-  // Loading states
   isLoading: boolean;
   isRefreshing: boolean;
   error: string | null;
-
-  // Actions
   fetchSnapshot: () => Promise<void>;
   refresh: () => Promise<void>;
   clearError: () => void;
 }
 
+function applySnapshotState(snapshot: any) {
+  return {
+    sentiment: snapshot?.sentiment ?? null,
+    topPicks: snapshot?.top_picks ?? [],
+    gainers: snapshot?.gainers ?? [],
+    losers: snapshot?.losers ?? [],
+    shorts: snapshot?.shorts ?? [],
+    indices: snapshot?.indices ?? [],
+    pennyStocks: snapshot?.penny_stocks ?? [],
+  };
+}
+
 export const useMarketStore = create<MarketState>((set, get) => ({
-  // Initial state
   sentiment: null,
   topPicks: [],
   gainers: [],
@@ -42,15 +49,9 @@ export const useMarketStore = create<MarketState>((set, get) => ({
     set({ isLoading: true, error: null });
 
     try {
-      const snapshot = await getMarketSnapshot();
+      const snapshot = await queryClient.fetchQuery(snapshotQueryOptions());
       set({
-        sentiment: snapshot.sentiment,
-        topPicks: snapshot.top_picks,
-        gainers: snapshot.gainers,
-        losers: snapshot.losers,
-        shorts: snapshot.shorts,
-        indices: snapshot.indices,
-        pennyStocks: snapshot.penny_stocks,
+        ...applySnapshotState(snapshot),
         isLoading: false,
       });
     } catch (error) {
@@ -65,15 +66,9 @@ export const useMarketStore = create<MarketState>((set, get) => ({
     set({ isRefreshing: true, error: null });
 
     try {
-      const snapshot = await getMarketSnapshot();
+      const snapshot = await queryClient.fetchQuery(snapshotQueryOptions());
       set({
-        sentiment: snapshot.sentiment,
-        topPicks: snapshot.top_picks,
-        gainers: snapshot.gainers,
-        losers: snapshot.losers,
-        shorts: snapshot.shorts,
-        indices: snapshot.indices,
-        pennyStocks: snapshot.penny_stocks,
+        ...applySnapshotState(snapshot),
         isRefreshing: false,
       });
     } catch (error) {
@@ -86,3 +81,4 @@ export const useMarketStore = create<MarketState>((set, get) => ({
 
   clearError: () => set({ error: null }),
 }));
+

@@ -67,15 +67,29 @@ class MarketRegimeAnalyzer(BaseAnalyzer):
         economic_context = data.get('economic_context') if data else None
 
         # Get key indicators
-        vix = market_data.get('vix', 20.0)
+        vix = market_data.get('vix')
         spy_data = market_data.get('spy', {})
         qqq_data = market_data.get('qqq', {})
         iwm_data = market_data.get('iwm', {})
+        risk_proxies = market_data.get('risk_proxies', {}) or {}
+
+        if vix is None and not spy_data and not qqq_data and not iwm_data:
+            return MarketRegimeResult(
+                regime='ROTATION',
+                spy_trend='UNKNOWN',
+                confidence=0.1,
+                description='Market context unavailable',
+                status='unavailable',
+                data_quality='insufficient',
+                reason='VIX and index trend data unavailable',
+            )
 
         # Calculate regime indicators
-        vix_signal = self._classify_vix(vix)
+        vix_signal = self._classify_vix(vix) if vix is not None else 'UNKNOWN'
         spy_trend = self._determine_trend(spy_data)
-        breadth = self._estimate_breadth(spy_data, iwm_data)
+        breadth = market_data.get('breadth')
+        if breadth is None:
+            breadth = self._estimate_breadth(spy_data, iwm_data)
 
         # Get economic indicators (yield curve, Fed stance)
         yield_curve_inverted = False
@@ -90,7 +104,7 @@ class MarketRegimeAnalyzer(BaseAnalyzer):
         # Determine regime (now with economic context)
         regime, description = self._determine_regime(
             vix_signal, spy_trend, breadth, spy_data, qqq_data, iwm_data,
-            yield_curve_inverted, fed_stance, risk_environment
+            yield_curve_inverted, fed_stance, risk_environment, risk_proxies
         )
 
         # Get factor weights for this regime
@@ -103,7 +117,7 @@ class MarketRegimeAnalyzer(BaseAnalyzer):
         confidence = self._calculate_confidence(market_data, economic_context)
 
         # Calculate VIX percentile (approximation based on historical ranges)
-        vix_percentile = self._vix_to_percentile(vix)
+        vix_percentile = self._vix_to_percentile(vix) if vix is not None else None
 
         result = MarketRegimeResult(
             regime=regime,
@@ -114,10 +128,13 @@ class MarketRegimeAnalyzer(BaseAnalyzer):
             sector_rotation=sector_rotation,
             factor_weights=factor_weights,
             confidence=confidence,
-            description=description
+            description=description,
+            status='available',
+            data_quality='complete' if vix is not None and spy_data else 'partial',
+            reason='' if vix is not None and spy_data else 'One or more macro inputs unavailable',
         )
 
-        self._log_analysis("MARKET", f"regime={regime}, vix={vix:.1f}, yield_inverted={yield_curve_inverted}")
+        self._log_analysis("MARKET", f"regime={regime}, vix={vix if vix is not None else 'N/A'}, yield_inverted={yield_curve_inverted}")
         return result
 
     def _classify_vix(self, vix: float) -> str:
@@ -183,16 +200,18 @@ class MarketRegimeAnalyzer(BaseAnalyzer):
         iwm_data: Dict,
         yield_curve_inverted: bool = False,
         fed_stance: str = 'NEUTRAL',
-        risk_environment: str = 'NEUTRAL'
+        risk_environment: str = 'NEUTRAL',
+        risk_proxies: Optional[Dict[str, float]] = None,
     ) -> tuple:
         """Determine overall market regime with economic context."""
+        risk_score, risk_details = self._score_risk_proxies(risk_proxies or {})
 
         # CRISIS: VIX extreme or high with downtrend
         if vix_signal in ['EXTREME', 'HIGH'] and spy_trend == 'DOWNTREND':
             return 'CRISIS', 'High fear with declining prices - defensive positioning recommended'
 
         # Yield curve inversion is a strong recession signal
-        if yield_curve_inverted and vix_signal in ['ELEVATED', 'HIGH']:
+        if yield_curve_inverted and vix_signal in ['ELEVATED', 'HIGH'] and risk_score <= 0:
             return 'RISK_OFF', 'Yield curve inverted with elevated VIX - recession risk elevated'
 
         # RISK_OFF: Elevated VIX or defensive trend, or adverse economic environment
@@ -205,11 +224,19 @@ class MarketRegimeAnalyzer(BaseAnalyzer):
         if risk_environment == 'ADVERSE':
             return 'RISK_OFF', 'Adverse economic conditions - favor quality and defensive sectors'
 
+        if breadth <= 35 or risk_score <= -2:
+            desc = 'Weak market participation and defensive cross-asset signals'
+            if risk_details:
+                desc += f" ({', '.join(risk_details)})"
+            return 'RISK_OFF', desc
+
         # RECOVERY: VIX declining from high, trend improving
         if spy_trend == 'RECOVERY':
             desc = 'Market recovering from selloff - momentum + value favored'
             if fed_stance == 'DOVISH':
                 desc += ' (Fed supportive)'
+            if breadth < 50 or risk_score < 0:
+                desc += ' but participation remains uneven'
             return 'RECOVERY', desc
 
         # RISK_ON: Low/normal VIX with uptrend
@@ -222,18 +249,31 @@ class MarketRegimeAnalyzer(BaseAnalyzer):
                 # Be cautious even in bullish conditions if yield curve inverted
                 return 'ROTATION', 'Bull trend but yield curve inverted - balanced approach with caution'
 
+            if breadth < 50 or risk_score < 0:
+                desc = 'Bull trend but leadership is narrow - balanced approach'
+                if risk_details:
+                    desc += f" ({', '.join(risk_details)})"
+                return 'ROTATION', desc
+
             if qqq_change > spy_change + 2:
                 desc = 'Bull market with growth leadership - momentum favored'
                 if fed_stance == 'DOVISH':
                     desc += ' (Fed supportive)'
+                if breadth >= 65 and risk_score >= 2:
+                    desc = 'Bull market with broad risk participation - momentum favored'
                 return 'RISK_ON', desc
 
-            return 'RISK_ON', 'Bull market conditions - momentum and growth favored'
+            desc = 'Bull market conditions - momentum and growth favored'
+            if breadth >= 65 and risk_score >= 2:
+                desc = 'Bull market with broad participation - momentum and cyclicals favored'
+            return 'RISK_ON', desc
 
         # ROTATION: Mixed signals
         desc = 'Mixed signals with sector rotation - balanced approach'
         if fed_stance == 'HAWKISH':
             desc += ' (Fed hawkish)'
+        elif risk_details:
+            desc += f" ({', '.join(risk_details)})"
         return 'ROTATION', desc
 
     def _get_factor_weights(self, regime: str) -> Dict[str, float]:
@@ -307,10 +347,12 @@ class MarketRegimeAnalyzer(BaseAnalyzer):
             bool(market_data.get('vix')),
             bool(market_data.get('spy')),
             bool(market_data.get('qqq')),
-            bool(market_data.get('iwm'))
+            bool(market_data.get('iwm')),
+            market_data.get('breadth') is not None,
+            bool(market_data.get('risk_proxies')),
         ])
 
-        confidence = 0.4 + (data_points * 0.12)
+        confidence = 0.35 + (data_points * 0.08)
 
         # Economic context adds confidence
         if economic_context:
@@ -321,6 +363,32 @@ class MarketRegimeAnalyzer(BaseAnalyzer):
                 confidence += 0.05
 
         return min(confidence, 0.9)
+
+    def _score_risk_proxies(self, risk_proxies: Dict[str, float]) -> tuple[float, list[str]]:
+        """Score cross-asset risk appetite using liquid ETF relationships."""
+        if not risk_proxies:
+            return 0.0, []
+
+        score = 0.0
+        details = []
+
+        def apply_signal(value: Optional[float], positive_threshold: float, negative_threshold: float, label: str) -> None:
+            nonlocal score
+            if value is None:
+                return
+            if value >= positive_threshold:
+                score += 1.0
+                details.append(f"{label} supportive")
+            elif value <= negative_threshold:
+                score -= 1.0
+                details.append(f"{label} defensive")
+
+        apply_signal(risk_proxies.get('small_vs_large'), 1.0, -1.0, 'small caps')
+        apply_signal(risk_proxies.get('equal_weight_vs_cap_weight'), 0.75, -0.75, 'breadth')
+        apply_signal(risk_proxies.get('consumer_discretionary_vs_staples'), 1.5, -1.5, 'consumer cyclicals')
+        apply_signal(risk_proxies.get('credit_vs_duration'), 1.0, -1.0, 'credit')
+
+        return score, details
 
     def _vix_to_percentile(self, vix: float) -> float:
         """Convert VIX level to approximate historical percentile."""

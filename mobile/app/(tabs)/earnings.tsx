@@ -1,205 +1,265 @@
-import React from 'react';
-import { View, Text, ScrollView, StyleSheet, Platform } from 'react-native';
+import React, { useMemo } from 'react';
+import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, fontSize, fontFamily, borderRadius } from '../../constants/theme';
+import { useEarningsCalendarQuery } from '../../hooks/useStockQueries';
+import { colors, fontFamily, fontSize, spacing } from '../../constants/theme';
 import Surface from '../../components/ui/Surface';
+import Badge from '../../components/ui/Badge';
+import StatePanel from '../../components/ui/StatePanel';
+import { CardSkeleton } from '../../components/ui/Loading';
+import { confidenceVariant, dataQualityVariant, earningsBucketLabel, formatTimestampLabel } from '../../lib/presentation';
+import type { EarningsCalendarItem } from '../../lib/types';
+import SectionHeader from '../../components/ui/SectionHeader';
 
-// Earnings date badge uses platform-adapted styling
-const dateBadgeStyle = Platform.select({
-  ios: {
-    backgroundColor: colors.ios.glassRegular,
-    borderWidth: 1,
-    borderColor: colors.ios.glassBorderMedium,
-  },
-  android: {
-    backgroundColor: colors.android.surfaceContainerHigh,
-    elevation: 1,
-  },
-  default: {
-    backgroundColor: colors.surfaceVariant,
-  },
-});
+function EarningsGroup({ title, items }: { title: string; items: EarningsCalendarItem[] }) {
+  if (!items.length) return null;
+
+  return (
+    <View style={styles.section}>
+      <SectionHeader title={title} subtitle={`${items.length} upcoming reports`} />
+      <View style={styles.list}>
+        {items.map((item) => (
+          <Surface key={`${title}-${item.ticker}-${item.earnings_date}`} style={styles.card} variant="filled">
+            <View style={styles.cardHeader}>
+              <View style={styles.cardCopy}>
+                <Text style={styles.ticker}>{item.ticker}</Text>
+                <Text style={styles.company}>{item.company_name}</Text>
+                <Text style={styles.meta}>{item.earnings_date}</Text>
+              </View>
+              <View style={styles.daysWrap}>
+                <Text style={styles.daysValue}>{item.days_until}</Text>
+                <Text style={styles.daysLabel}>days</Text>
+              </View>
+            </View>
+            <View style={styles.badgeRow}>
+              {item.recommendation ? <Badge label={item.recommendation} variant={item.recommendation.includes('BUY') ? 'success' : item.recommendation.includes('SELL') ? 'error' : 'warning'} size="small" /> : null}
+              {item.confidence ? <Badge label={item.confidence} variant={confidenceVariant(item.confidence)} size="small" /> : null}
+              {item.data_quality ? <Badge label={item.data_quality.status} variant={dataQualityVariant(item.data_quality)} size="small" /> : null}
+              <Badge label={`${item.days_until}d`} variant="neutral" size="small" />
+            </View>
+            <View style={styles.metrics}>
+              <Text style={styles.metricText}>
+                Surprise: {typeof item.prev_surprise_pct === 'number' ? `${item.prev_surprise_pct.toFixed(1)}%` : 'N/A'}
+              </Text>
+              <Text style={styles.metricText}>
+                {item.generated_at ? formatTimestampLabel(item.generated_at) : 'Freshness unavailable'}
+              </Text>
+            </View>
+          </Surface>
+        ))}
+      </View>
+    </View>
+  );
+}
 
 export default function EarningsScreen() {
-  // This would typically fetch from an earnings calendar API
-  // For now, showing placeholder UI
+  const { data, isLoading, isFetching, error, refetch } = useEarningsCalendarQuery(60);
 
-  const upcomingEarnings = [
-    { ticker: 'AAPL', company: 'Apple Inc.', date: 'Jan 30, 2026', estimate: '$2.35' },
-    { ticker: 'MSFT', company: 'Microsoft Corporation', date: 'Jan 31, 2026', estimate: '$3.12' },
-    { ticker: 'GOOGL', company: 'Alphabet Inc.', date: 'Feb 1, 2026', estimate: '$1.89' },
-    { ticker: 'AMZN', company: 'Amazon.com Inc.', date: 'Feb 1, 2026', estimate: '$1.45' },
-    { ticker: 'META', company: 'Meta Platforms Inc.', date: 'Feb 2, 2026', estimate: '$5.23' },
-  ];
+  const grouped = useMemo(() => {
+    const buckets: Record<string, EarningsCalendarItem[]> = {
+      Today: [],
+      'This Week': [],
+      'Next 30 Days': [],
+    };
+
+    (data ?? []).forEach((item) => {
+      buckets[earningsBucketLabel(item.days_until)]?.push(item);
+    });
+
+    return buckets;
+  }, [data]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView
-        style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
+        refreshControl={<RefreshControl tintColor={colors.primary} refreshing={isFetching && !isLoading} onRefresh={() => refetch()} />}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
         <View style={styles.header}>
+          <Text style={styles.eyebrow}>Live Only</Text>
           <Text style={styles.title}>Earnings Calendar</Text>
-          <Text style={styles.subtitle}>Upcoming earnings announcements</Text>
+          <Text style={styles.subtitle}>
+            Companies without real upcoming earnings dates are excluded.
+          </Text>
         </View>
 
-        {/* This Week */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Ionicons name="calendar" size={20} color={colors.primary} />
-            <Text style={styles.sectionTitle}>This Week</Text>
-          </View>
-
-          {upcomingEarnings.map((item, index) => (
-            <Surface key={index} style={styles.earningsCard}>
-              <View style={styles.earningsHeader}>
-                <View>
-                  <Text style={styles.earningsTicker}>{item.ticker}</Text>
-                  <Text style={styles.earningsCompany}>{item.company}</Text>
-                </View>
-                <View style={styles.earningsDate}>
-                  <Ionicons name="time-outline" size={14} color={colors.textMuted} />
-                  <Text style={styles.dateText}>{item.date}</Text>
-                </View>
-              </View>
-              <View style={styles.estimateRow}>
-                <Text style={styles.estimateLabel}>EPS Estimate</Text>
-                <Text style={styles.estimateValue}>{item.estimate}</Text>
-              </View>
-            </Surface>
-          ))}
-        </View>
-
-        {/* Info Box */}
-        <Surface style={styles.infoBox}>
-          <Ionicons name="information-circle" size={24} color={colors.info} />
-          <View style={styles.infoContent}>
-            <Text style={styles.infoTitle}>Earnings Season</Text>
-            <Text style={styles.infoText}>
-              Q4 2025 earnings season is underway. Major tech companies report this week.
-              Tap any stock to analyze before earnings.
+        {data?.length ? (
+          <Surface style={styles.heroCard} variant="elevated">
+            <Text style={styles.heroTitle}>Live reports with confidence and freshness.</Text>
+            <Text style={styles.heroBody}>
+              The calendar only shows companies with verified dates. Each card carries score, confidence, and data quality.
             </Text>
+            <View style={styles.heroBadges}>
+              <Badge label={`${data.length} live names`} variant="primary" />
+              <Badge label={formatTimestampLabel(data[0]?.generated_at)} variant="neutral" />
+              <Badge label={data[0]?.freshness_summary ?? 'Freshness tracked'} variant="success" />
+            </View>
+          </Surface>
+        ) : null}
+
+        {isLoading ? (
+          <View style={styles.section}>
+            <CardSkeleton />
+            <CardSkeleton style={styles.skeletonGap} />
           </View>
-        </Surface>
+        ) : error ? (
+          <View style={styles.section}>
+            <StatePanel
+              icon="cloud-offline-outline"
+              title="Earnings unavailable"
+              message={error instanceof Error ? error.message : 'The backend did not return a live earnings calendar.'}
+              actionLabel="Retry"
+              onAction={() => refetch()}
+              tone="error"
+            />
+          </View>
+          ) : (data?.length ?? 0) === 0 ? (
+          <View style={styles.section}>
+            <StatePanel
+              icon="calendar-outline"
+              title="No live earnings"
+              message="The backend only returns companies with verified upcoming dates."
+            />
+          </View>
+        ) : (
+          <>
+            <EarningsGroup title="Today" items={grouped.Today} />
+            <EarningsGroup title="This Week" items={grouped['This Week']} />
+            <EarningsGroup title="Next 30 Days" items={grouped['Next 30 Days']} />
+          </>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  badgeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  card: {
+    gap: spacing.sm,
+  },
+  cardCopy: {
+    flex: 1,
+  },
+  cardHeader: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  company: {
+    color: colors.text,
+    fontFamily: fontFamily.sansSemibold,
+    fontSize: fontSize.md,
+  },
   container: {
-    flex: 1,
     backgroundColor: colors.background,
-  },
-  scrollView: {
     flex: 1,
   },
-  scrollContent: {
-    paddingBottom: spacing.xl * 3,
+  heroBadges: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  heroBody: {
+    color: colors.textSecondary,
+    fontFamily: fontFamily.sans,
+    fontSize: fontSize.sm,
+    lineHeight: 20,
+    marginTop: spacing.xs,
+  },
+  heroCard: {
+    marginHorizontal: spacing.md,
+    marginTop: spacing.lg,
+  },
+  heroTitle: {
+    color: colors.text,
+    fontFamily: fontFamily.serif,
+    fontSize: fontSize.xl,
+  },
+  daysLabel: {
+    color: colors.textMuted,
+    fontFamily: fontFamily.sans,
+    fontSize: fontSize.xs,
+    textTransform: 'uppercase',
+  },
+  daysValue: {
+    color: colors.text,
+    fontFamily: fontFamily.serif,
+    fontSize: fontSize['2xl'],
+  },
+  daysWrap: {
+    alignItems: 'flex-end',
+  },
+  eyebrow: {
+    color: colors.textMuted,
+    fontFamily: fontFamily.sansMedium,
+    fontSize: fontSize.xs,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
   },
   header: {
     paddingHorizontal: spacing.md,
     paddingTop: spacing.md,
-    paddingBottom: spacing.sm,
   },
-  title: {
-    color: colors.text,
-    fontSize: fontSize['2xl'],
-    fontFamily: fontFamily.serif,
-    fontWeight: '400',
+  list: {
+    gap: spacing.sm,
   },
-  subtitle: {
-    color: colors.textSecondary,
-    fontSize: fontSize.sm,
+  meta: {
+    color: colors.textMuted,
+    fontFamily: fontFamily.sans,
+    fontSize: fontSize.xs,
     marginTop: 2,
+  },
+  metricText: {
+    color: colors.textSecondary,
+    fontFamily: fontFamily.sans,
+    fontSize: fontSize.sm,
+  },
+  metrics: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  scrollContent: {
+    paddingBottom: spacing.xl * 2,
   },
   section: {
     marginTop: spacing.lg,
     paddingHorizontal: spacing.md,
   },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: spacing.md,
-    gap: spacing.sm,
-  },
-  sectionTitle: {
-    color: colors.text,
-    fontSize: fontSize.lg,
-    fontFamily: fontFamily.sansBold,
-  },
-  earningsCard: {
-    marginBottom: spacing.sm,
-  },
-  earningsHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: spacing.sm,
-  },
-  earningsTicker: {
-    color: colors.text,
-    fontSize: fontSize.lg,
-    fontWeight: 'bold',
-  },
-  earningsCompany: {
-    color: colors.textSecondary,
-    fontSize: fontSize.sm,
+  sectionSubtitle: {
+    color: colors.textMuted,
+    fontFamily: fontFamily.sans,
+    fontSize: fontSize.xs,
     marginTop: 2,
   },
-  earningsDate: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    borderRadius: borderRadius.sm,
-    gap: 4,
-    ...dateBadgeStyle,
+  skeletonGap: {
+    marginTop: spacing.sm,
   },
-  dateText: {
+  subtitle: {
     color: colors.textSecondary,
-    fontSize: fontSize.xs,
-  },
-  estimateRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingTop: spacing.sm,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: Platform.OS === 'ios' ? colors.ios.separator : colors.border,
-  },
-  estimateLabel: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-  },
-  estimateValue: {
-    color: colors.text,
-    fontSize: fontSize.md,
-    fontWeight: '600',
-  },
-  infoBox: {
-    flexDirection: 'row',
-    marginHorizontal: spacing.md,
-    marginTop: spacing.lg,
-    backgroundColor: colors.infoMuted,
-    borderColor: `${colors.info}30`,
-    gap: spacing.sm,
-  },
-  infoContent: {
-    flex: 1,
-  },
-  infoTitle: {
-    color: colors.text,
-    fontSize: fontSize.md,
-    fontWeight: '600',
-    marginBottom: spacing.xs,
-  },
-  infoText: {
-    color: colors.textSecondary,
+    fontFamily: fontFamily.sans,
     fontSize: fontSize.sm,
     lineHeight: 20,
+    marginTop: spacing.xs,
+  },
+  ticker: {
+    color: colors.textMuted,
+    fontFamily: fontFamily.sansMedium,
+    fontSize: fontSize.xs,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+  title: {
+    color: colors.text,
+    fontFamily: fontFamily.serif,
+    fontSize: fontSize['3xl'],
+    marginTop: 4,
   },
 });

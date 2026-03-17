@@ -1,457 +1,167 @@
-import React, { useEffect } from 'react';
-import { View, Text, ScrollView, RefreshControl, StyleSheet, Pressable, Platform } from 'react-native';
-import { useRouter } from 'expo-router';
+import React from 'react';
+import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withSpring,
-  withDelay,
-  withTiming,
-  interpolate,
-} from 'react-native-reanimated';
-import { useMarketStore } from '../../stores/useMarketStore';
-import { PennyStock } from '../../lib/types';
-import { colors, spacing, fontSize, fontFamily, borderRadius, animation } from '../../constants/theme';
-import { isLiquidGlassAvailable } from '../../components/ui/Surface';
-import { GlassIconButton } from '../../components/ui/GlassMenuItem';
+import { useSnapshotQuery } from '../../hooks/useStockQueries';
+import { colors, fontFamily, fontSize, spacing } from '../../constants/theme';
 import SentimentHeader from '../../components/market/SentimentHeader';
 import MarketStrip from '../../components/market/MarketStrip';
-import StockCard from '../../components/stocks/StockCard';
-import { Loading } from '../../components/ui/Loading';
+import { StockCard } from '../../components/stocks/StockCard';
+import { CardSkeleton } from '../../components/ui/Loading';
+import StatePanel from '../../components/ui/StatePanel';
+import Surface from '../../components/ui/Surface';
+import Badge from '../../components/ui/Badge';
 import { useSheetContext } from '../../components/sheets/SheetProvider';
+import type { ScreenerResult } from '../../lib/types';
+import { formatTimestampLabel, isTimestampStale } from '../../lib/presentation';
+import SectionHeader from '../../components/ui/SectionHeader';
 
-// ============================================================================
-// iOS 26 LIQUID GLASS
-// ============================================================================
-
-let GlassView: any = null;
-
-try {
-  const glassModule = require('expo-glass-effect');
-  GlassView = glassModule.GlassView;
-} catch {
-  // Not available
-}
-
-// ============================================================================
-// ANIMATED PRESSABLE
-// ============================================================================
-
-const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
-
-// ============================================================================
-// MINI STOCK CARD (Platform-adaptive)
-// ============================================================================
-
-interface MiniStockCardProps {
-  stock: any;
-  index: number;
-}
-
-function MiniStockCard({ stock, index }: MiniStockCardProps) {
-  const { openStockSheet } = useSheetContext();
-  const isPositive = stock.price_change_pct >= 0;
-  const pressed = useSharedValue(0);
-  const opacity = useSharedValue(0);
-  const translateY = useSharedValue(8);
-
-  useEffect(() => {
-    opacity.value = withDelay(index * 60, withTiming(1, { duration: 250 }));
-    translateY.value = withDelay(index * 60, withSpring(0, animation.spring.gentle));
-  }, []);
-
-  const handlePressIn = () => {
-    pressed.value = withSpring(1, animation.spring.snappy);
-  };
-
-  const handlePressOut = () => {
-    pressed.value = withSpring(0, animation.spring.bouncy);
-  };
-
-  const handlePress = async () => {
-    if (Platform.OS !== 'web') {
-      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
-    openStockSheet(stock.ticker);
-  };
-
-  const animatedStyle = useAnimatedStyle(() => {
-    const scale = interpolate(pressed.value, [0, 1], [1, 0.97]);
-    return {
-      opacity: opacity.value,
-      transform: [{ translateY: translateY.value }, { scale }],
-    };
-  });
-
-  const cardContent = (
-    <>
-      <View style={styles.miniCardLeft}>
-        <Text style={styles.miniTicker}>{stock.ticker}</Text>
-        <Text style={styles.miniPrice}>
-          ${typeof stock.current_price === 'number' ? stock.current_price.toFixed(2) : stock.current_price}
-        </Text>
-      </View>
-      <View style={[styles.miniChangeChip, isPositive ? styles.miniChangePositive : styles.miniChangeNegative]}>
-        <Ionicons
-          name={isPositive ? 'caret-up' : 'caret-down'}
-          size={9}
-          color={isPositive ? colors.strongBuy : colors.strongSell}
-        />
-        <Text style={[styles.miniChange, isPositive ? styles.positive : styles.negative]}>
-          {isPositive ? '+' : ''}{typeof stock.price_change_pct === 'number' ? stock.price_change_pct.toFixed(2) : stock.price_change_pct}%
-        </Text>
-      </View>
-    </>
-  );
-
-  // iOS 26+: Use native Liquid Glass
-  if (isLiquidGlassAvailable() && GlassView) {
-    return (
-      <AnimatedPressable
-        onPress={handlePress}
-        onPressIn={handlePressIn}
-        onPressOut={handlePressOut}
-        style={[styles.miniCardGlassWrapper, animatedStyle]}
-      >
-        <GlassView
-          style={styles.miniCardGlass}
-          glassEffectStyle="regular"
-          isInteractive
-        >
-          {cardContent}
-        </GlassView>
-      </AnimatedPressable>
-    );
-  }
-
-  // Fallback: iOS < 26 / Android / Web
-  return (
-    <AnimatedPressable
-      onPress={handlePress}
-      onPressIn={handlePressIn}
-      onPressOut={handlePressOut}
-      style={[
-        styles.miniCard,
-        Platform.OS === 'ios' && styles.miniCardIOS,
-        Platform.OS === 'android' && styles.miniCardAndroid,
-        animatedStyle,
-      ]}
-    >
-      {/* iOS inner glow */}
-      {Platform.OS === 'ios' && <View style={styles.miniCardIOSGlow} pointerEvents="none" />}
-      {cardContent}
-    </AnimatedPressable>
-  );
-}
-
-// ============================================================================
-// PENNY STOCK CARD (horizontal scroll item)
-// ============================================================================
-
-interface PennyStockCardProps {
-  stock: PennyStock;
-  index: number;
-}
-
-function PennyStockCard({ stock, index }: PennyStockCardProps) {
-  const { openStockSheet } = useSheetContext();
-  const isPositive = stock.change_pct >= 0;
-  const pressed = useSharedValue(0);
-  const opacity = useSharedValue(0);
-
-  useEffect(() => {
-    opacity.value = withDelay(index * 60, withTiming(1, { duration: 250 }));
-  }, []);
-
-  const handlePressIn = () => {
-    pressed.value = withSpring(1, animation.spring.snappy);
-  };
-  const handlePressOut = () => {
-    pressed.value = withSpring(0, animation.spring.bouncy);
-  };
-  const handlePress = async () => {
-    if (Platform.OS !== 'web') {
-      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
-    openStockSheet(stock.ticker);
-  };
-
-  const animatedStyle = useAnimatedStyle(() => {
-    const scale = interpolate(pressed.value, [0, 1], [1, 0.97]);
-    return { opacity: opacity.value, transform: [{ scale }] };
-  });
-
-  const getScoreColor = (score: number) => {
-    if (score >= 60) return colors.strongBuy;
-    if (score >= 45) return colors.warning;
-    return colors.strongSell;
-  };
-
-  const pennyContent = (
-    <>
-      <View style={styles.pennyCardHeader}>
-        <Text style={styles.pennyTicker}>{stock.ticker}</Text>
-        <View style={[styles.pennyScoreBadge, { backgroundColor: `${getScoreColor(stock.score)}20` }]}>
-          <Text style={[styles.pennyScoreText, { color: getScoreColor(stock.score) }]}>
-            {stock.score}
-          </Text>
-        </View>
-      </View>
-      <Text style={styles.pennyName} numberOfLines={1}>{stock.company_name}</Text>
-      <Text style={styles.pennySector}>{stock.sector}</Text>
-      <View style={styles.pennyPriceRow}>
-        <Text style={styles.pennyPrice}>${stock.price.toFixed(2)}</Text>
-        <View style={[styles.miniChangeChip, isPositive ? styles.miniChangePositive : styles.miniChangeNegative]}>
-          <Ionicons
-            name={isPositive ? 'caret-up' : 'caret-down'}
-            size={9}
-            color={isPositive ? colors.strongBuy : colors.strongSell}
-          />
-          <Text style={[styles.miniChange, isPositive ? styles.positive : styles.negative]}>
-            {isPositive ? '+' : ''}{stock.change_pct.toFixed(2)}%
-          </Text>
-        </View>
-      </View>
-    </>
-  );
-
-  // iOS 26+: Use native Liquid Glass
-  if (isLiquidGlassAvailable() && GlassView) {
-    return (
-      <AnimatedPressable
-        onPress={handlePress}
-        onPressIn={handlePressIn}
-        onPressOut={handlePressOut}
-        style={[styles.pennyCardGlassWrapper, animatedStyle]}
-      >
-        <GlassView
-          style={styles.pennyCardGlass}
-          glassEffectStyle="regular"
-          isInteractive
-        >
-          {pennyContent}
-        </GlassView>
-      </AnimatedPressable>
-    );
-  }
-
-  // Fallback: iOS < 26 / Android / Web
-  return (
-    <AnimatedPressable
-      onPress={handlePress}
-      onPressIn={handlePressIn}
-      onPressOut={handlePressOut}
-      style={[
-        styles.pennyCard,
-        Platform.OS === 'ios' && styles.pennyCardIOS,
-        Platform.OS === 'android' && styles.pennyCardAndroid,
-        animatedStyle,
-      ]}
-    >
-      {Platform.OS === 'ios' && <View style={styles.miniCardIOSGlow} pointerEvents="none" />}
-      {pennyContent}
-    </AnimatedPressable>
-  );
-}
-
-// ============================================================================
-// SECTION HEADER COMPONENT
-// ============================================================================
-
-interface SectionHeaderProps {
+interface RankedSectionProps {
   title: string;
-  subtitle?: string;
-  icon?: keyof typeof Ionicons.glyphMap;
-  iconColor?: string;
+  subtitle: string;
+  stocks: ScreenerResult[];
+  emptyCopy: string;
+  onOpenTicker: (ticker: string) => void;
 }
 
-function SectionHeader({ title, subtitle, icon, iconColor }: SectionHeaderProps) {
+function RankedSection({ title, subtitle, stocks, emptyCopy, onOpenTicker }: RankedSectionProps) {
   return (
-    <View style={styles.sectionHeader}>
-      <View style={styles.sectionHeaderRow}>
-        {icon && (
-          <Ionicons name={icon} size={18} color={iconColor || colors.text} style={styles.sectionIcon} />
-        )}
+    <View style={styles.section}>
+      <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>{title}</Text>
+        <Text style={styles.sectionSubtitle}>{subtitle}</Text>
       </View>
-      {subtitle && <Text style={styles.sectionSubtitle}>{subtitle}</Text>}
+      {stocks.length ? (
+        <View style={styles.list}>
+          {stocks.map((stock) => (
+            <StockCard key={`${title}-${stock.ticker}`} stock={stock} variant="compact" onPress={() => onOpenTicker(stock.ticker)} />
+          ))}
+        </View>
+      ) : (
+        <StatePanel icon="bar-chart-outline" title="No ranked ideas" message={emptyCopy} tone="info" />
+      )}
     </View>
   );
 }
 
-// ============================================================================
-// OVERVIEW SCREEN
-// ============================================================================
-
-export default function OverviewScreen() {
-  const router = useRouter();
+export default function HomeScreen() {
+  const { data, isLoading, isFetching, error, refetch } = useSnapshotQuery();
   const { openStockSheet } = useSheetContext();
-  const {
-    sentiment,
-    topPicks,
-    gainers,
-    losers,
-    shorts,
-    indices,
-    pennyStocks,
-    isLoading,
-    isRefreshing,
-    error,
-    fetchSnapshot,
-    refresh,
-  } = useMarketStore();
 
-  useEffect(() => {
-    fetchSnapshot();
-  }, []);
-
-  const handleRefresh = async () => {
-    if (Platform.OS !== 'web') {
-      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
-    refresh();
-  };
-
-  if (isLoading && !sentiment) {
-    return <Loading fullScreen message="Loading market data..." />;
-  }
+  const stale = isTimestampStale(data?.generated_at);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView
-        style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
-        refreshControl={
-          <RefreshControl
-            refreshing={isRefreshing}
-            onRefresh={handleRefresh}
-            tintColor={colors.primary}
-            colors={[colors.primary]}
-            progressBackgroundColor={
-              Platform.OS === 'android' ? colors.android.surfaceContainerHigh : undefined
-            }
-          />
-        }
+        refreshControl={<RefreshControl tintColor={colors.primary} refreshing={isFetching && !isLoading} onRefresh={() => refetch()} />}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
         <View style={styles.header}>
-          <View style={styles.headerRow}>
-            <View>
-              <Text style={styles.title}>StockPulse</Text>
-              <Text style={styles.subtitle}>Real-time Investment Analysis</Text>
-            </View>
-            <GlassIconButton
-              icon="settings-outline"
-              onPress={() => router.push('/(tabs)/profile')}
-              size={40}
-            />
-          </View>
+          <Text style={styles.eyebrow}>Production Snapshot</Text>
+          <Text style={styles.title}>Market Overview</Text>
+          <Text style={styles.subtitle}>
+            Ranked surfaces exclude names that fail the v3 eligibility gate and carry confidence plus freshness.
+          </Text>
         </View>
 
-        {/* Market Sentiment */}
-        {sentiment && <SentimentHeader sentiment={sentiment} />}
-
-        {/* Market Indices Strip */}
-        {indices.length > 0 && (
-          <View style={styles.section}>
-            <MarketStrip
-              indices={indices}
-              onIndexPress={(index) => openStockSheet(index.symbol)}
-            />
+        <Surface style={styles.heroCard} variant="elevated">
+          <Text style={styles.heroTitle}>Evidence-led market snapshot.</Text>
+          <Text style={styles.heroBody}>
+            The home tab prioritizes regime, participation, and data quality before any ranked list appears.
+          </Text>
+          <View style={styles.heroBadges}>
+            <Badge label={data?.eligible_count != null ? `${data.eligible_count} eligible` : 'Eligible universe'} variant="primary" />
+            <Badge label={data?.excluded_count != null ? `${data.excluded_count} excluded` : 'Eligibility gate'} variant="neutral" />
+            <Badge label={stale ? 'Stale inputs' : 'Fresh snapshot'} variant={stale ? 'warning' : 'success'} />
           </View>
-        )}
+        </Surface>
 
-        {/* Error Message */}
-        {error && (
-          isLiquidGlassAvailable() && GlassView ? (
-            <View style={styles.errorGlassWrapper}>
-              <GlassView style={styles.errorGlass} glassEffectStyle="regular" tintColor="#ef444420">
-                <View style={styles.errorGlassContent}>
-                  <Ionicons name="warning" size={20} color={colors.strongSell} />
-                  <Text style={styles.errorText}>{error}</Text>
+        {isLoading ? (
+          <View style={styles.section}>
+            <CardSkeleton variant="full" />
+            <CardSkeleton style={styles.skeletonGap} />
+            <CardSkeleton style={styles.skeletonGap} />
+          </View>
+        ) : error ? (
+          <View style={styles.section}>
+            <StatePanel
+              icon="cloud-offline-outline"
+              title="Snapshot unavailable"
+              message={error instanceof Error ? error.message : 'The backend did not return a usable market snapshot.'}
+              actionLabel="Retry"
+              onAction={() => refetch()}
+              tone="error"
+            />
+            </View>
+          ) : data ? (
+          <>
+            <SentimentHeader sentiment={data.sentiment} />
+
+            <View style={styles.section}>
+              <Surface style={styles.summaryCard} variant="filled">
+                <View style={styles.summaryHeader}>
+                  <View>
+                    <Text style={styles.summaryTitle}>Freshness & coverage</Text>
+                    <Text style={styles.summaryText}>{formatTimestampLabel(data.generated_at)}</Text>
+                  </View>
+                  <Badge label={stale ? 'Stale inputs' : 'Fresh'} variant={stale ? 'warning' : 'success'} />
                 </View>
-              </GlassView>
+                <View style={styles.summaryMeta}>
+                  <Badge label={`${data.eligible_count ?? 0} eligible`} variant="primary" />
+                  <Badge label={`${data.excluded_count ?? 0} excluded`} variant="neutral" />
+                  {data.freshness_summary ? <Badge label={data.freshness_summary} variant="neutral" /> : null}
+                </View>
+              </Surface>
             </View>
-          ) : (
-            <View style={[
-              styles.errorContainer,
-              Platform.OS === 'ios' && styles.errorContainerIOS,
-              Platform.OS === 'android' && styles.errorContainerAndroid,
-            ]}>
-              <Ionicons name="warning" size={20} color={colors.strongSell} />
-              <Text style={styles.errorText}>{error}</Text>
-            </View>
-          )
-        )}
 
-        {/* Top Picks */}
-        {topPicks.length > 0 && (
-          <View style={styles.section}>
-            <SectionHeader title="Top Picks" subtitle="Highest scoring stocks" />
-            <View style={styles.cardList}>
-              {topPicks.map((stock) => (
-                <StockCard key={stock.ticker} stock={stock} variant="compact" />
-              ))}
-            </View>
-          </View>
-        )}
-
-        {/* Gainers & Losers */}
-        <View style={styles.gainersLosersContainer}>
-          {/* Gainers */}
-          {gainers.length > 0 && (
-            <View style={styles.halfSection}>
-              <SectionHeader title="Gainers" icon="trending-up" iconColor={colors.strongBuy} />
-              <View style={styles.miniCardList}>
-                {gainers.slice(0, 4).map((stock, i) => (
-                  <MiniStockCard key={stock.ticker} stock={stock} index={i} />
-                ))}
+            {data.indices.length ? (
+              <View style={styles.section}>
+                <SectionHeader title="Indices" subtitle="Cross-market context" />
+                <MarketStrip indices={data.indices} />
               </View>
-            </View>
-          )}
+            ) : null}
 
-          {/* Losers */}
-          {losers.length > 0 && (
-            <View style={styles.halfSection}>
-              <SectionHeader title="Losers" icon="trending-down" iconColor={colors.strongSell} />
-              <View style={styles.miniCardList}>
-                {losers.slice(0, 4).map((stock, i) => (
-                  <MiniStockCard key={stock.ticker} stock={stock} index={i} />
-                ))}
-              </View>
-            </View>
-          )}
-        </View>
+            <RankedSection
+              title="Top Picks"
+              subtitle="Highest-confidence long candidates"
+              stocks={data.top_picks}
+              emptyCopy="No candidates met the strict long criteria."
+              onOpenTicker={openStockSheet}
+            />
 
-        {/* Short Candidates */}
-        {shorts.length > 0 && (
+            <RankedSection
+              title="Shorts"
+              subtitle="Highest-conviction bearish setups"
+              stocks={data.shorts}
+              emptyCopy="No bearish setups passed the quality gate."
+              onOpenTicker={openStockSheet}
+            />
+
+            <RankedSection
+              title="Gainers"
+              subtitle="Best intraday movers still passing eligibility"
+              stocks={data.gainers}
+              emptyCopy="No eligible gainers are available right now."
+              onOpenTicker={openStockSheet}
+            />
+
+            <RankedSection
+              title="Losers"
+              subtitle="Weakest movers still passing eligibility"
+              stocks={data.losers}
+              emptyCopy="No eligible losers are available right now."
+              onOpenTicker={openStockSheet}
+            />
+          </>
+        ) : (
           <View style={styles.section}>
-            <SectionHeader title="Short Candidates" subtitle="Lowest scoring stocks" icon="arrow-down-circle" iconColor={colors.strongSell} />
-            <View style={styles.cardList}>
-              {shorts.slice(0, 5).map((stock) => (
-                <StockCard key={stock.ticker} stock={stock} variant="compact" />
-              ))}
-            </View>
-          </View>
-        )}
-
-        {/* Penny Stocks */}
-        {pennyStocks.length > 0 && (
-          <View style={styles.section}>
-            <SectionHeader title="Penny Stocks" subtitle="Speculative stocks under $5" icon="flash" iconColor={colors.warning} />
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.pennyScrollContent}
-            >
-              {pennyStocks.slice(0, 10).map((stock, i) => (
-                <PennyStockCard key={stock.ticker} stock={stock} index={i} />
-              ))}
-            </ScrollView>
+            <StatePanel
+              icon="information-circle-outline"
+              title="No market snapshot"
+              message="The backend returned an empty snapshot."
+              actionLabel="Retry"
+              onAction={() => refetch()}
+            />
           </View>
         )}
       </ScrollView>
@@ -459,319 +169,106 @@ export default function OverviewScreen() {
   );
 }
 
-// ============================================================================
-// STYLES
-// ============================================================================
-
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
     backgroundColor: colors.background,
-  },
-  scrollView: {
     flex: 1,
   },
-  scrollContent: {
-    paddingBottom: spacing.xl * 3,
+  heroBadges: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginTop: spacing.md,
   },
-
-  // ==========================================================================
-  // HEADER
-  // ==========================================================================
+  heroBody: {
+    color: colors.textSecondary,
+    fontFamily: fontFamily.sans,
+    fontSize: fontSize.sm,
+    lineHeight: 20,
+    marginTop: spacing.xs,
+  },
+  heroCard: {
+    marginHorizontal: spacing.md,
+    marginTop: spacing.lg,
+  },
+  heroTitle: {
+    color: colors.text,
+    fontFamily: fontFamily.serif,
+    fontSize: fontSize.xl,
+  },
+  eyebrow: {
+    color: colors.textMuted,
+    fontFamily: fontFamily.sansMedium,
+    fontSize: fontSize.xs,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
   header: {
     paddingHorizontal: spacing.md,
     paddingTop: spacing.md,
-    paddingBottom: spacing.sm,
   },
-  headerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  list: {
+    gap: spacing.sm,
   },
-  settingsButton: {
-    padding: spacing.xs,
+  scrollContent: {
+    paddingBottom: spacing.xl * 2,
   },
-  title: {
-    color: colors.text,
-    fontSize: fontSize['3xl'],
-    fontFamily: fontFamily.serif,
-    fontWeight: '400',
-    letterSpacing: -0.5,
-  },
-  subtitle: {
-    color: colors.textMuted,
-    fontSize: fontSize.sm,
-    fontFamily: fontFamily.sans,
-    marginTop: 2,
-  },
-
-  // ==========================================================================
-  // SECTIONS
-  // ==========================================================================
   section: {
     marginTop: spacing.lg,
     paddingHorizontal: spacing.md,
   },
   sectionHeader: {
-    marginBottom: spacing.md,
-  },
-  sectionHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  sectionIcon: {
-    marginRight: spacing.xs,
-  },
-  sectionTitle: {
-    color: colors.text,
-    fontSize: fontSize.lg,
-    fontFamily: fontFamily.sansBold,
+    marginBottom: spacing.sm,
   },
   sectionSubtitle: {
     color: colors.textMuted,
+    fontFamily: fontFamily.sans,
+    fontSize: fontSize.xs,
+    marginTop: 2,
+  },
+  sectionTitle: {
+    color: colors.text,
+    fontFamily: fontFamily.serif,
+    fontSize: fontSize.xl,
+  },
+  skeletonGap: {
+    marginTop: spacing.sm,
+  },
+  subtitle: {
+    color: colors.textSecondary,
+    fontFamily: fontFamily.sans,
+    fontSize: fontSize.sm,
+    lineHeight: 20,
+    marginTop: spacing.xs,
+  },
+  summaryCard: {
+    gap: spacing.md,
+  },
+  summaryHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  summaryMeta: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  summaryText: {
+    color: colors.textSecondary,
+    fontFamily: fontFamily.sans,
     fontSize: fontSize.sm,
     marginTop: 2,
   },
-  cardList: {
-    gap: spacing.sm,
-  },
-
-  // ==========================================================================
-  // GAINERS / LOSERS
-  // ==========================================================================
-  gainersLosersContainer: {
-    flexDirection: 'row',
-    paddingHorizontal: spacing.md,
-    marginTop: spacing.lg,
-    gap: spacing.md,
-  },
-  halfSection: {
-    flex: 1,
-  },
-  miniCardList: {
-    gap: spacing.xs + 2,
-  },
-
-  // ==========================================================================
-  // MINI STOCK CARD — iOS 26 Glass
-  // ==========================================================================
-  miniCardGlassWrapper: {
-    borderRadius: borderRadius.md,
-    overflow: 'hidden',
-  },
-  miniCardGlass: {
-    borderRadius: borderRadius.md,
-    padding: spacing.sm + 2,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    overflow: 'hidden',
-  },
-
-  // ==========================================================================
-  // MINI STOCK CARD — Fallback
-  // ==========================================================================
-  miniCard: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.md,
-    padding: spacing.sm + 2,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
-    overflow: 'hidden',
-  },
-  // iOS Glass styling
-  miniCardIOS: {
-    backgroundColor: colors.ios.glassRegular,
-    borderColor: colors.ios.glassBorderMedium,
-    shadowColor: colors.ios.shadowColor,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.15,
-    shadowRadius: 3,
-  },
-  miniCardIOSGlow: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.ios.vibrancyLight,
-  },
-  // Android M3 styling
-  miniCardAndroid: {
-    backgroundColor: colors.android.surfaceContainerHigh,
-    borderWidth: 0,
-    elevation: 1,
-    borderRadius: borderRadius.md,
-  },
-  miniCardLeft: {
-    flex: 1,
-  },
-  miniTicker: {
+  summaryTitle: {
     color: colors.text,
-    fontSize: fontSize.sm,
-    fontWeight: '700',
-    letterSpacing: 0.3,
-  },
-  miniPrice: {
-    color: colors.textMuted,
-    fontSize: fontSize.xs,
-    marginTop: 1,
-  },
-  miniChangeChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.xs + 2,
-    paddingVertical: 3,
-    borderRadius: borderRadius.sm,
-  },
-  miniChangePositive: {
-    backgroundColor: colors.successMuted,
-  },
-  miniChangeNegative: {
-    backgroundColor: colors.errorMuted,
-  },
-  miniChange: {
-    fontSize: fontSize.xs,
-    fontWeight: '600',
-    marginLeft: 2,
-  },
-  positive: {
-    color: colors.strongBuy,
-  },
-  negative: {
-    color: colors.strongSell,
-  },
-
-  // ==========================================================================
-  // PENNY STOCK CARD — iOS 26 Glass
-  // ==========================================================================
-  pennyCardGlassWrapper: {
-    width: 150,
-    borderRadius: borderRadius.lg,
-    overflow: 'hidden',
-  },
-  pennyCardGlass: {
-    borderRadius: borderRadius.lg,
-    padding: spacing.md,
-    overflow: 'hidden',
-  },
-
-  // ==========================================================================
-  // ERROR — iOS 26 Glass
-  // ==========================================================================
-  errorGlassWrapper: {
-    margin: spacing.md,
-    borderRadius: borderRadius.md,
-    overflow: 'hidden',
-  },
-  errorGlass: {
-    borderRadius: borderRadius.md,
-    overflow: 'hidden',
-  },
-  errorGlassContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: spacing.md,
-    gap: spacing.sm,
-  },
-
-  // ==========================================================================
-  // ERROR — Fallback
-  // ==========================================================================
-  errorContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.errorMuted,
-    margin: spacing.md,
-    padding: spacing.md,
-    borderRadius: borderRadius.md,
-    gap: spacing.sm,
-  },
-  errorContainerIOS: {
-    borderWidth: 1,
-    borderColor: `${colors.strongSell}30`,
-  },
-  errorContainerAndroid: {
-    elevation: 1,
-  },
-  errorText: {
-    color: colors.strongSell,
-    fontSize: fontSize.sm,
-    flex: 1,
-  },
-
-  // ==========================================================================
-  // PENNY STOCKS
-  // ==========================================================================
-  pennyScrollContent: {
-    paddingHorizontal: spacing.md,
-    gap: spacing.sm,
-    paddingBottom: spacing.xs,
-  },
-  pennyCard: {
-    width: 150,
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    padding: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    overflow: 'hidden',
-  },
-  pennyCardIOS: {
-    backgroundColor: colors.ios.glassRegular,
-    borderColor: colors.ios.glassBorderMedium,
-    shadowColor: colors.ios.shadowColor,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-  },
-  pennyCardAndroid: {
-    backgroundColor: colors.android.surfaceContainerHigh,
-    borderWidth: 0,
-    elevation: 2,
-  },
-  pennyCardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: spacing.xs,
-  },
-  pennyTicker: {
-    color: colors.text,
+    fontFamily: fontFamily.sansSemibold,
     fontSize: fontSize.md,
-    fontWeight: '700',
-    letterSpacing: 0.3,
   },
-  pennyScoreBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: borderRadius.sm,
-  },
-  pennyScoreText: {
-    fontSize: fontSize.xs,
-    fontWeight: '700',
-  },
-  pennyName: {
-    color: colors.textSecondary,
-    fontSize: fontSize.xs,
-    marginBottom: 2,
-  },
-  pennySector: {
-    color: colors.textMuted,
-    fontSize: 10,
-    marginBottom: spacing.sm,
-  },
-  pennyPriceRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  pennyPrice: {
+  title: {
     color: colors.text,
-    fontSize: fontSize.sm,
-    fontWeight: '600',
+    fontFamily: fontFamily.serif,
+    fontSize: fontSize['3xl'],
+    marginTop: 4,
   },
 });

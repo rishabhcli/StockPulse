@@ -61,6 +61,16 @@ class IntrinsicValueAnalyzer(BaseAnalyzer):
         if not current_price and info:
             current_price = info.get('currentPrice') or info.get('regularMarketPrice', 0)
 
+        if not current_price:
+            return IntrinsicValueResult(
+                current_price=0.0,
+                valuation_signal='UNKNOWN',
+                conviction=0.0,
+                status='unavailable',
+                data_quality='insufficient',
+                reason='Current price unavailable for valuation',
+            )
+
         methods_used: List[ValuationMethod] = []
         fair_values: List[float] = []
 
@@ -93,11 +103,27 @@ class IntrinsicValueAnalyzer(BaseAnalyzer):
             fair_value_low = min(fair_values)
             fair_value_high = max(fair_values)
             fair_value_mid = np.median(fair_values)
+            data_quality = 'complete'
         else:
-            # Fallback to analyst targets if available
-            fair_value_mid = info.get('targetMeanPrice', current_price)
-            fair_value_low = info.get('targetLowPrice', current_price * 0.8)
-            fair_value_high = info.get('targetHighPrice', current_price * 1.2)
+            target_mean = info.get('targetMeanPrice')
+            target_low = info.get('targetLowPrice')
+            target_high = info.get('targetHighPrice')
+
+            if target_mean:
+                fair_value_mid = target_mean
+                fair_value_low = target_low or target_mean
+                fair_value_high = target_high or target_mean
+                data_quality = 'partial'
+            else:
+                return IntrinsicValueResult(
+                    current_price=current_price,
+                    valuation_signal='UNKNOWN',
+                    methods_used=methods_used,
+                    conviction=0.0,
+                    status='unavailable',
+                    data_quality='insufficient',
+                    reason='Insufficient valuation inputs',
+                )
 
         # Calculate margin of safety
         if fair_value_mid and fair_value_mid > 0:
@@ -129,7 +155,9 @@ class IntrinsicValueAnalyzer(BaseAnalyzer):
             valuation_signal=valuation_signal,
             methods_used=methods_used,
             conviction=conviction,
-            implied_growth_rate=implied_growth
+            implied_growth_rate=implied_growth,
+            status='available',
+            data_quality=data_quality,
         )
 
         self._log_analysis(

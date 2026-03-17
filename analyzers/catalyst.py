@@ -13,9 +13,10 @@ from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 import logging
 import re
+import requests
 
 from analyzers.base import BaseAnalyzer
-from models.results import CatalystResult, Catalyst
+from models.results import CatalystResult, Catalyst, AnalyzedArticle
 
 logger = logging.getLogger(__name__)
 
@@ -89,12 +90,14 @@ class CatalystAnalyzer(BaseAnalyzer):
         if dividend_catalyst:
             catalysts.append(dividend_catalyst)
 
+        analyzed_articles = self._build_articles(news)
+
         # ============== News-Based Catalysts ==============
-        news_catalysts = self._analyze_news_catalysts(news, today)
+        news_catalysts = self._analyze_news_catalysts(analyzed_articles)
         catalysts.extend(news_catalysts)
 
         # ============== Calculate News Sentiment ==============
-        news_sentiment = self._calculate_news_sentiment(news)
+        news_sentiment = self._calculate_news_sentiment(analyzed_articles)
 
         # ============== Reddit Social Sentiment ==============
         social_sentiment = self._get_reddit_sentiment(ticker)
@@ -119,7 +122,11 @@ class CatalystAnalyzer(BaseAnalyzer):
             catalyst_sentiment=catalyst_sentiment,
             risk_factor=risk_factor,
             news_sentiment_score=news_sentiment,
-            social_sentiment_score=social_sentiment
+            social_sentiment_score=social_sentiment,
+            analyzed_articles=analyzed_articles,
+            status='available' if analyzed_articles or catalysts else 'partial',
+            data_quality='complete' if analyzed_articles else 'partial',
+            reason='' if analyzed_articles or catalysts else 'No catalyst or article content available',
         )
 
         self._log_analysis(
@@ -254,72 +261,158 @@ class CatalystAnalyzer(BaseAnalyzer):
         )
 
     def _analyze_news_catalysts(
-        self, news: List[Dict], today: datetime
+        self, articles: List[AnalyzedArticle]
     ) -> List[Catalyst]:
         """Extract catalysts from recent news."""
         catalysts = []
 
-        for item in news[:10]:  # Check recent 10 news items
-            title = item.get('title', '').lower()
+        for article in articles[:10]:
+            if article.content_quality == 'insufficient_content':
+                continue
+
+            title = article.title.lower()
 
             # Check for catalyst keywords
             for catalyst_type, keywords in self.CATALYST_KEYWORDS.items():
                 if any(kw in title for kw in keywords):
-                    # Determine sentiment
-                    positive_count = sum(1 for w in self.POSITIVE_KEYWORDS if w in title)
-                    negative_count = sum(1 for w in self.NEGATIVE_KEYWORDS if w in title)
-
-                    if positive_count > negative_count:
-                        sentiment = 'POSITIVE'
-                    elif negative_count > positive_count:
-                        sentiment = 'NEGATIVE'
-                    else:
-                        sentiment = 'NEUTRAL'
-
-                    # Get date
-                    pub_time = item.get('providerPublishTime', 0)
-                    if pub_time:
-                        pub_date = datetime.fromtimestamp(pub_time)
-                        days_ago = (today - pub_date).days
-                    else:
-                        days_ago = 0
-
                     catalysts.append(Catalyst(
                         catalyst_type=catalyst_type.upper(),
                         date=None,  # News is past event
                         days_away=0,  # Already happened
                         expected_impact='MEDIUM' if catalyst_type in ['acquisition', 'fda'] else 'LOW',
-                        sentiment=sentiment,
-                        description=item.get('title', '')[:100],
-                        confidence=0.6
+                        sentiment=article.sentiment,
+                        description=article.title[:100],
+                        confidence=max(article.confidence, 0.6),
                     ))
                     break  # One catalyst per news item
 
         return catalysts[:5]  # Limit to 5 news-based catalysts
 
-    def _calculate_news_sentiment(self, news: List[Dict]) -> float:
+    def _calculate_news_sentiment(self, articles: List[AnalyzedArticle]) -> float:
         """Calculate overall news sentiment score (-1 to +1)."""
-        if not news:
+        if not articles:
             return 0.0
 
         total_sentiment = 0
         count = 0
 
-        for item in news[:10]:
-            title = item.get('title', '').lower()
+        for article in articles[:10]:
+            if article.content_quality == 'insufficient_content':
+                continue
 
-            positive_count = sum(1 for w in self.POSITIVE_KEYWORDS if w in title)
-            negative_count = sum(1 for w in self.NEGATIVE_KEYWORDS if w in title)
-
-            if positive_count > 0 or negative_count > 0:
-                sentiment = (positive_count - negative_count) / max(positive_count + negative_count, 1)
-                total_sentiment += sentiment
+            if article.sentiment == 'POSITIVE':
+                total_sentiment += article.confidence
+                count += 1
+            elif article.sentiment == 'NEGATIVE':
+                total_sentiment -= article.confidence
                 count += 1
 
         if count == 0:
             return 0.0
 
         return total_sentiment / count
+
+    def _build_articles(self, news: List[Dict[str, Any]]) -> List[AnalyzedArticle]:
+        """Normalize raw provider news into a scored article list."""
+        analyzed: List[AnalyzedArticle] = []
+        for item in news[:10]:
+            title = item.get('title', '') or ''
+            link = item.get('link')
+            source = item.get('publisher', 'Unknown')
+            published = None
+
+            publish_time = item.get('providerPublishTime')
+            if publish_time:
+                try:
+                    published = datetime.fromtimestamp(publish_time).strftime('%Y-%m-%d %H:%M')
+                except Exception:
+                    published = None
+
+            article_text = self._extract_article_text(item)
+            content_quality = 'provider'
+
+            if len(article_text) < 120 and link:
+                fetched_text = self._fetch_article_body(link)
+                if fetched_text:
+                    article_text = fetched_text
+                    content_quality = 'fetched'
+
+            if len(article_text) < 60:
+                analyzed.append(AnalyzedArticle(
+                    title=title,
+                    source=source,
+                    published=published,
+                    url=link,
+                    sentiment='NEUTRAL',
+                    confidence=0.0,
+                    content_quality='insufficient_content',
+                ))
+                continue
+
+            sentiment, confidence = self._score_text_sentiment(article_text)
+            analyzed.append(AnalyzedArticle(
+                title=title,
+                source=source,
+                published=published,
+                url=link,
+                sentiment=sentiment,
+                confidence=confidence,
+                content_quality=content_quality,
+            ))
+
+        return analyzed
+
+    def _extract_article_text(self, item: Dict[str, Any]) -> str:
+        """Extract article text from provider fields before attempting network fetch."""
+        parts: List[str] = []
+
+        for key in ('title', 'summary', 'description', 'snippet'):
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                parts.append(value.strip())
+
+        content = item.get('content')
+        if isinstance(content, str) and content.strip():
+            parts.append(content.strip())
+        elif isinstance(content, dict):
+            for key in ('summary', 'description', 'snippet', 'title', 'body'):
+                value = content.get(key)
+                if isinstance(value, str) and value.strip():
+                    parts.append(value.strip())
+
+        return ' '.join(dict.fromkeys(parts))
+
+    def _fetch_article_body(self, url: str) -> str:
+        """Fetch article content when provider metadata is insufficient."""
+        try:
+            response = requests.get(
+                url,
+                timeout=5,
+                headers={'User-Agent': 'StockPulse/1.0'},
+            )
+            response.raise_for_status()
+            body = response.text
+            body = re.sub(r'(?is)<(script|style).*?>.*?</\\1>', ' ', body)
+            body = re.sub(r'(?s)<[^>]+>', ' ', body)
+            body = re.sub(r'\\s+', ' ', body)
+            return body[:4000].strip()
+        except Exception:
+            return ''
+
+    def _score_text_sentiment(self, text: str) -> tuple[str, float]:
+        """Score article sentiment from extracted text."""
+        text_lower = text.lower()
+        positive_count = sum(1 for word in self.POSITIVE_KEYWORDS if word in text_lower)
+        negative_count = sum(1 for word in self.NEGATIVE_KEYWORDS if word in text_lower)
+        total = positive_count + negative_count
+
+        if total == 0:
+            return 'NEUTRAL', 0.2
+        if positive_count > negative_count:
+            return 'POSITIVE', min(1.0, (positive_count - negative_count) / total + 0.25)
+        if negative_count > positive_count:
+            return 'NEGATIVE', min(1.0, (negative_count - positive_count) / total + 0.25)
+        return 'NEUTRAL', 0.3
 
     def _determine_catalyst_sentiment(
         self,

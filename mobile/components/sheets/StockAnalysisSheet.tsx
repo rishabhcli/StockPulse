@@ -11,8 +11,9 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { analyzeStock } from '../../lib/api';
 import { StockAnalysis } from '../../lib/types';
-import { colors, spacing, fontSize } from '../../constants/theme';
+import { colors, spacing } from '../../constants/theme';
 import { Loading } from '../ui/Loading';
+import StatePanel from '../ui/StatePanel';
 import SheetBackground from './SheetBackground';
 import StockAnalysisContent from '../stocks/StockAnalysisContent';
 
@@ -125,8 +126,7 @@ const StockAnalysisSheet = forwardRef<BottomSheetModal, StockAnalysisSheetProps>
           </BottomSheetView>
         ) : error ? (
           <BottomSheetView style={styles.errorContainer}>
-            <Ionicons name="alert-circle" size={48} color={colors.error} />
-            <Text style={styles.errorText}>{error}</Text>
+            <StatePanel icon="cloud-offline-outline" title="Analysis failed" message={error} tone="error" />
           </BottomSheetView>
         ) : analysis ? (
           <StockAnalysisContent
@@ -180,11 +180,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: spacing.xl,
     paddingTop: spacing.xl * 2,
-  },
-  errorText: {
-    color: colors.textSecondary,
-    fontSize: fontSize.md,
-    marginTop: spacing.md,
-    textAlign: 'center',
   },
 });

@@ -1,9 +1,17 @@
 import axios, { AxiosError } from 'axios';
-import { StockAnalysis, ScreenerResult, MarketSentiment, MarketSnapshot, IndexData, PennyStock, PennyStockData } from './types';
+import {
+  EarningsCalendarItem,
+  IndexData,
+  MarketSentiment,
+  MarketSnapshot,
+  PennyStock,
+  PennyStockData,
+  ScreenerResult,
+  StockAnalysis,
+} from './types';
 import { API_URL } from './config';
 import { supabase, isSupabaseEnabled } from './supabase';
 
-// Use configured API URL
 const API_BASE_URL = API_URL;
 
 const api = axios.create({
@@ -14,14 +22,26 @@ const api = axios.create({
   },
 });
 
-// Request interceptor: attach Supabase auth token and log
+export class ApiRequestError extends Error {
+  status: number | null;
+  code: string | null;
+  payload: any;
+
+  constructor(message: string, options?: { status?: number | null; code?: string | null; payload?: any }) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.status = options?.status ?? null;
+    this.code = options?.code ?? null;
+    this.payload = options?.payload ?? null;
+  }
+}
+
 api.interceptors.request.use(
   async (config) => {
     if (__DEV__) {
       console.log(`[API] ${config.method?.toUpperCase()} ${config.url?.split('?')[0]}`);
     }
 
-    // Attach Supabase JWT for authenticated Flask endpoints
     if (isSupabaseEnabled) {
       try {
         const { data: { session } } = await supabase.auth.getSession();
@@ -41,10 +61,9 @@ api.interceptors.request.use(
   }
 );
 
-// Response interceptor for error handling
 api.interceptors.response.use(
   (response) => response,
-  (error: AxiosError) => {
+  (error: AxiosError<any>) => {
     if (__DEV__) {
       if (error.response) {
         console.error(`[API] Error ${error.response.status}`);
@@ -52,101 +71,199 @@ api.interceptors.response.use(
         console.error('[API] Error:', error.message);
       }
     }
+
+    const apiReason = error.response?.data?.reason || error.response?.data?.error;
+    if (apiReason) {
+      return Promise.reject(new ApiRequestError(String(apiReason), {
+        status: error.response?.status ?? null,
+        code: error.response?.data?.code ?? null,
+        payload: error.response?.data ?? null,
+      }));
+    }
     return Promise.reject(error);
   }
 );
 
-// Build a signal description from a raw indicator value
 function describeIndicator(name: string, value: number): { signal: 'bullish' | 'bearish' | 'neutral'; description: string } {
   switch (name) {
     case 'rsi':
       if (value > 70) return { signal: 'bearish', description: `Overbought at ${value.toFixed(1)}` };
       if (value < 30) return { signal: 'bullish', description: `Oversold at ${value.toFixed(1)}` };
       return { signal: 'neutral', description: `Neutral at ${value.toFixed(1)}` };
-    case 'mfi':
-      if (value > 80) return { signal: 'bearish', description: `Overbought at ${value.toFixed(1)}` };
-      if (value < 20) return { signal: 'bullish', description: `Oversold at ${value.toFixed(1)}` };
-      return { signal: 'neutral', description: `Neutral at ${value.toFixed(1)}` };
     case 'adx':
       if (value > 25) return { signal: 'bullish', description: `Strong trend (${value.toFixed(1)})` };
       return { signal: 'neutral', description: `Weak trend (${value.toFixed(1)})` };
-    case 'cci':
-      if (value > 100) return { signal: 'bearish', description: `Overbought at ${value.toFixed(1)}` };
-      if (value < -100) return { signal: 'bullish', description: `Oversold at ${value.toFixed(1)}` };
-      return { signal: 'neutral', description: `Neutral at ${value.toFixed(1)}` };
     default:
       return { signal: 'neutral', description: `${value.toFixed(2)}` };
   }
 }
 
-// Transform flat indicators dict to the nested TechnicalAnalysis shape
 function buildTechnicalAnalysis(raw: any): any {
   if (!raw || typeof raw !== 'object') return null;
 
-  // If already in nested format, return as-is
-  if (raw.rsi && typeof raw.rsi === 'object' && 'value' in raw.rsi) return raw;
-
-  const rsiVal = raw.RSI ?? raw.rsi;
-  const adxVal = raw.ADX ?? raw.adx;
-  const mfiVal = raw.MFI ?? raw.mfi;
-  const cciVal = raw.CCI ?? raw.cci;
-  const macdVal = raw.MACD ?? raw.macd;
-  const macdSig = raw.MACD_Signal ?? raw.macd_signal;
-  const macdHist = raw.MACD_Histogram ?? raw.macd_histogram;
-  const stochK = raw.Stochastic_K ?? raw.stochastic_k;
-  const stochD = raw.Stochastic_D ?? raw.stochastic_d;
+  const indicators = raw.indicators ?? {};
+  const rsiVal = indicators.RSI ?? indicators.rsi;
+  const adxVal = indicators.ADX ?? indicators.adx;
+  const mfiVal = indicators.MFI ?? indicators.mfi;
+  const cciVal = indicators.CCI ?? indicators.cci;
+  const macdVal = indicators.MACD ?? indicators.macd;
+  const macdSig = indicators.MACD_Signal ?? indicators.macd_signal;
+  const macdHist = indicators.MACD_Histogram ?? indicators.MACD_Hist ?? indicators.macd_histogram;
+  const stochK = indicators.Stochastic_K ?? indicators.stochastic_k;
+  const stochD = indicators.Stochastic_D ?? indicators.stochastic_d;
 
   return {
-    rsi: rsiVal != null ? { value: rsiVal, ...describeIndicator('rsi', rsiVal) } : null,
-    macd: macdVal != null ? {
+    rsi: typeof rsiVal === 'number' ? { value: rsiVal, ...describeIndicator('rsi', rsiVal) } : null,
+    macd: typeof macdVal === 'number' ? {
       macd: macdVal,
       signal: macdSig ?? 0,
       histogram: macdHist ?? 0,
       trend: (macdHist ?? 0) > 0 ? 'bullish' : (macdHist ?? 0) < 0 ? 'bearish' : 'neutral',
     } : null,
-    stochastic: stochK != null ? {
+    stochastic: typeof stochK === 'number' ? {
       k: stochK,
       d: stochD ?? 0,
       signal: stochK > 80 ? 'bearish' : stochK < 20 ? 'bullish' : 'neutral',
     } : null,
-    adx: adxVal != null ? { value: adxVal, ...describeIndicator('adx', adxVal) } : null,
-    mfi: mfiVal != null ? { value: mfiVal, ...describeIndicator('mfi', mfiVal) } : null,
-    cci: cciVal != null ? { value: cciVal, ...describeIndicator('cci', cciVal) } : null,
+    adx: typeof adxVal === 'number' ? { value: adxVal, ...describeIndicator('adx', adxVal) } : null,
+    mfi: typeof mfiVal === 'number' ? { value: mfiVal, ...describeIndicator('mfi', mfiVal) } : null,
+    cci: typeof cciVal === 'number' ? { value: cciVal, ...describeIndicator('cci', cciVal) } : null,
+  };
+}
+
+function toMarketSentiment(data: any): MarketSentiment {
+  const vix = typeof data?.vix === 'number' ? data.vix : null;
+  const sentimentSignal = data?.signal ?? data?.regime ?? 'NEUTRAL';
+  const breadth = typeof data?.breadth === 'number' ? data.breadth : null;
+  const riskProxies = data?.risk_proxies && typeof data.risk_proxies === 'object' ? data.risk_proxies : null;
+
+  const vixScore = typeof vix === 'number'
+    ? Math.max(0, Math.min(100, 100 - ((vix - 12) * 4)))
+    : null;
+  const breadthScore = typeof breadth === 'number'
+    ? Math.max(0, Math.min(100, breadth))
+    : null;
+  const proxyValues = riskProxies ? Object.values(riskProxies).filter((value): value is number => typeof value === 'number') : [];
+  const proxyScore = proxyValues.length
+    ? Math.max(0, Math.min(100, 50 + ((proxyValues.reduce((sum, value) => sum + value, 0) / proxyValues.length) * 12)))
+    : null;
+
+  const compositeInputs = [vixScore, breadthScore, proxyScore].filter((value): value is number => typeof value === 'number');
+  const riskScale = compositeInputs.length
+    ? Math.round(compositeInputs.reduce((sum, value) => sum + value, 0) / compositeInputs.length)
+    : sentimentSignal === 'RISK_ON'
+      ? 65
+      : sentimentSignal === 'RISK_OFF'
+        ? 35
+        : 50;
+
+  return {
+    signal: data?.signal ?? null,
+    vix,
+    vix_signal: sentimentSignal,
+    fear_greed_index: riskScale,
+    fear_greed_label: sentimentSignal,
+    treasury_10y: data?.yield_curve?.ten_year ?? null,
+    sp500_trend: typeof data?.spy_change_1m === 'number'
+      ? (data.spy_change_1m >= 0 ? 'UPTREND' : 'DOWNTREND')
+      : 'UNKNOWN',
+    overall_sentiment: sentimentSignal,
+    regime: data?.regime ?? null,
+    regime_status: data?.regime_status ?? null,
+    regime_confidence: typeof data?.regime_confidence === 'number' ? data.regime_confidence : null,
+    description: data?.description ?? null,
+    breadth,
+    risk_proxies: riskProxies,
+    yield_curve: data?.yield_curve ?? null,
+    fed_stance: data?.fed_stance ?? null,
+    sources: data?.sources ?? null,
+    generated_at: data?.generated_at ?? data?.timestamp ?? undefined,
+    request_id: data?.request_id ?? null,
+  };
+}
+
+function normalizeAnalysis(data: any): StockAnalysis {
+  const technicalLayer = data.layer_analysis?.technical_confluence ?? {};
+  const intrinsicLayer = data.layer_analysis?.intrinsic_value ?? {};
+  const displayIndicators = data.display_indicators ?? {};
+  const marketSentiment = toMarketSentiment({
+    vix: data.market_context?.vix_level,
+    signal: data.market_context?.regime,
+    spy_change_1m: data.market_context?.indexes?.spy?.change_1m,
+    yield_curve: data.market_context?.economic_context?.yield_curve,
+    fed_stance: data.market_context?.fed_stance,
+    sources: data.market_context?.sources,
+  });
+
+  const investmentScore = data.score ?? 0;
+  const currentPrice = data.current_price ?? displayIndicators.current_price ?? 0;
+  const priceChange = data.dollar_change ?? displayIndicators.price_change ?? 0;
+  const priceChangePct = data.change_pct ?? displayIndicators.price_change_pct ?? 0;
+
+  return {
+    ...data,
+    data_quality: {
+      ...data.data_quality,
+      freshness_summary: data.data_quality?.freshness_summary ?? data.freshness_summary ?? null,
+    },
+    company_name: data.company_name ?? data.ticker,
+    current_price: currentPrice,
+    change_pct: priceChangePct,
+    dollar_change: priceChange,
+    display_indicators: displayIndicators,
+    fundamentals: {
+      ...data.fundamentals,
+      pe_ratio: data.fundamentals?.pe_ratio ?? data.fundamentals?.trailing_pe ?? null,
+      roe: data.fundamentals?.roe ?? data.fundamentals?.return_on_equity ?? null,
+    },
+    news_analysis: {
+      ...data.news_analysis,
+      overall_sentiment: data.news_analysis?.sentiment ?? 'NEUTRAL',
+      sentiment_score: data.news_analysis?.news_sentiment_score ?? 0,
+      articles: (data.news_analysis?.articles ?? []).map((article: any) => ({
+        ...article,
+        published: article.published ?? '',
+      })),
+    },
+    earnings: {
+      ...data.earnings,
+      last_earnings_date: data.earnings?.earnings_history?.[0]?.date ?? null,
+      last_earnings_surprise: data.earnings?.earnings_history?.[0]?.surprise ?? data.earnings?.earnings_surprise_avg ?? null,
+      next_earnings_date: data.earnings?.earnings_date ?? null,
+      earnings_history: (data.earnings?.earnings_history ?? []).map((item: any) => ({
+        date: item.date,
+        actual: item.actual ?? 0,
+        expected: item.estimate ?? item.expected ?? 0,
+        surprise_pct: item.surprise ?? item.surprise_pct ?? 0,
+      })),
+    },
+    investment_score: investmentScore,
+    price_change: priceChange,
+    price_change_pct: priceChangePct,
+    recommendation_reasons: [data.explanation].filter(Boolean),
+    technical_score: technicalLayer.confluence_score ?? 0,
+    fundamental_score: typeof intrinsicLayer.conviction === 'number' ? Math.round(intrinsicLayer.conviction * 100) : 0,
+    technical_analysis: buildTechnicalAnalysis(technicalLayer),
+    fundamental_analysis: data.fundamentals ?? null,
+    market_sentiment: marketSentiment,
+    timestamp: data.generated_at,
+  };
+}
+
+function normalizeScreenerResult(data: any): ScreenerResult {
+  return {
+    ...data,
+    investment_score: data.investment_score ?? data.score ?? 0,
+    price_change_pct: data.price_change_pct ?? data.change_pct ?? 0,
+    generated_at: data.generated_at ?? undefined,
+    request_id: data.request_id ?? null,
+    freshness_summary: data.freshness_summary ?? data.data_quality?.freshness_summary ?? null,
   };
 }
 
 export const analyzeStock = async (ticker: string): Promise<StockAnalysis> => {
-  const response = await api.post('/api/analyze', { ticker: ticker.toUpperCase() });
-  const data = response.data;
-
-  // Normalize API field names to match app types
-  const ms = data.market_sentiment ?? {};
-  const fgi = ms.fear_greed_index ?? 50;
-  const vix = ms.vix ?? 0;
-  let overall = 'Neutral';
-  if (fgi >= 55) overall = 'Bullish';
-  else if (fgi <= 45 || vix > 30) overall = 'Bearish';
-
-  return {
-    ...data,
-    investment_score: data.investment_score ?? data.score ?? 0,
-    price_change: data.price_change ?? data.dollar_change ?? 0,
-    price_change_pct: data.price_change_pct ?? data.change_pct ?? 0,
-    fundamental_analysis: data.fundamental_analysis ?? data.fundamentals ?? null,
-    technical_analysis: buildTechnicalAnalysis(data.technical_analysis ?? data.indicators),
-    recommendation_reasons: (data.recommendation_reasons ?? data.evidence ?? data.signals ?? [])
-      .map((r: any) => typeof r === 'string' ? r : (r.detail || r.factor || JSON.stringify(r))),
-    technical_score: data.technical_score ?? 0,
-    fundamental_score: data.fundamental_score ?? 0,
-    market_sentiment: {
-      ...ms,
-      vix_signal: ms.vix_signal ?? 'N/A',
-      fear_greed_label: ms.fear_greed_label ?? ms.fear_greed_signal ?? 'N/A',
-      treasury_10y: ms.treasury_10y ?? 0,
-      sp500_trend: ms.sp500_trend ?? 'N/A',
-      overall_sentiment: ms.overall_sentiment ?? overall,
-    },
-  };
+  const response = await api.post('/api/analyze', { ticker: ticker.toUpperCase(), scoring: 'v3' });
+  return normalizeAnalysis(response.data);
 };
 
 export const screenStocks = async (
@@ -156,40 +273,12 @@ export const screenStocks = async (
   const response = await api.get<{ stocks: any[] }>('/api/screen', {
     params: { filter, limit },
   });
-  // Normalize API field names to match app types
-  return (response.data.stocks ?? []).map((s: any) => ({
-    ...s,
-    investment_score: s.investment_score ?? s.score ?? 0,
-    price_change_pct: s.price_change_pct ?? s.change_pct ?? 0,
-  }));
+  return (response.data.stocks ?? []).map(normalizeScreenerResult);
 };
 
 export const getMarketSentiment = async (): Promise<MarketSentiment> => {
   const response = await api.get('/api/market-sentiment');
-  const data = response.data;
-
-  // Normalize API response to match MarketSentiment type.
-  // The backend returns fear_greed_signal but the app expects fear_greed_label,
-  // and doesn't include overall_sentiment or sp500_trend.
-  const vix = data.vix ?? 0;
-  const fearGreedIndex = data.fear_greed_index ?? 50;
-
-  // Derive overall sentiment from VIX + Fear & Greed
-  let overall = 'Neutral';
-  if (fearGreedIndex >= 70 && vix < 20) overall = 'Bullish';
-  else if (fearGreedIndex >= 55) overall = 'Bullish';
-  else if (fearGreedIndex <= 30 || vix > 30) overall = 'Bearish';
-  else if (fearGreedIndex <= 45) overall = 'Bearish';
-
-  return {
-    vix,
-    vix_signal: data.vix_signal ?? 'N/A',
-    fear_greed_index: fearGreedIndex,
-    fear_greed_label: data.fear_greed_signal ?? data.fear_greed_label ?? 'N/A',
-    treasury_10y: data.treasury_10y ?? 0,
-    sp500_trend: data.sp500_trend ?? 'N/A',
-    overall_sentiment: data.overall_sentiment ?? overall,
-  };
+  return toMarketSentiment(response.data);
 };
 
 export const getPennyStocks = async (): Promise<PennyStock[]> => {
@@ -202,49 +291,34 @@ export const getPennyStocks = async (): Promise<PennyStock[]> => {
 };
 
 export const getMarketSnapshot = async (): Promise<MarketSnapshot> => {
-  try {
-    // Fetch sentiment, all stocks, and penny stocks in parallel
-    const [sentiment, allStocks, pennyStocks] = await Promise.all([
-      getMarketSentiment(),
-      screenStocks('all', 100),
-      getPennyStocks(),
-    ]);
+  const response = await api.get('/api/snapshot');
+  const data = response.data;
 
-    // Derive top picks from the full list (score >= 75)
-    const topPicks = allStocks
-      .filter(s => s.investment_score >= 75)
-      .sort((a, b) => b.investment_score - a.investment_score)
-      .slice(0, 5);
+  return {
+    sentiment: toMarketSentiment(data.market_sentiment),
+    top_picks: (data.strong_buys ?? []).map(normalizeScreenerResult),
+    gainers: (data.gainers ?? []).map(normalizeScreenerResult),
+    losers: (data.losers ?? []).map(normalizeScreenerResult),
+    shorts: (data.shorts ?? []).map(normalizeScreenerResult),
+    indices: (data.market_indexes ?? []).map((index: any): IndexData => ({
+      symbol: index.symbol,
+      name: index.name,
+      price: index.price ?? 0,
+      change_pct: index.change_pct ?? 0,
+    })),
+    penny_stocks: await getPennyStocks(),
+    eligible_count: data.eligible_count,
+    excluded_count: data.excluded_count,
+    excluded_reasons_summary: data.excluded_reasons_summary,
+    generated_at: data.generated_at ?? data.timestamp,
+    request_id: data.request_id ?? null,
+    freshness_summary: data.freshness_summary ?? null,
+  };
+};
 
-    // Sort by price change percentage for gainers/losers
-    const sorted = [...allStocks].sort((a, b) => b.price_change_pct - a.price_change_pct);
-    const gainers = sorted.slice(0, 5);
-    const losers = sorted.slice(-5).reverse();
-
-    // Bottom-rated stocks (shorts)
-    const shorts = [...allStocks]
-      .sort((a, b) => a.investment_score - b.investment_score)
-      .slice(0, 5);
-
-    // Extract index data from the screened stocks
-    const indices: IndexData[] = [
-      { symbol: 'SPY', name: 'S&P 500', price: 0, change_pct: 0 },
-      { symbol: 'QQQ', name: 'NASDAQ', price: 0, change_pct: 0 },
-      { symbol: 'DIA', name: 'Dow Jones', price: 0, change_pct: 0 },
-    ];
-    for (const index of indices) {
-      const found = allStocks.find(s => s.ticker === index.symbol);
-      if (found) {
-        index.price = found.current_price;
-        index.change_pct = found.price_change_pct;
-      }
-    }
-
-    return { sentiment, top_picks: topPicks, gainers, losers, shorts, indices, penny_stocks: pennyStocks };
-  } catch (error) {
-    console.error('[API] Failed to fetch market snapshot:', error);
-    throw error;
-  }
+export const getEarningsCalendar = async (limit: number = 50): Promise<EarningsCalendarItem[]> => {
+  const response = await api.get('/api/earnings-calendar', { params: { limit } });
+  return response.data.earnings ?? [];
 };
 
 export const checkHealth = async (): Promise<boolean> => {

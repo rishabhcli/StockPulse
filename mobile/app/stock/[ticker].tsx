@@ -1,27 +1,24 @@
-import React, { useEffect } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-import { useLocalSearchParams, Stack } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
-import { useAnalysisStore } from '../../stores/useAnalysisStore';
-import { colors, spacing, fontSize } from '../../constants/theme';
+import React from 'react';
+import { StyleSheet, View } from 'react-native';
+import { Stack, useLocalSearchParams } from 'expo-router';
+import { useAnalysisQuery } from '../../hooks/useStockQueries';
 import StockAnalysisContent from '../../components/stocks/StockAnalysisContent';
+import StatePanel from '../../components/ui/StatePanel';
 import { Loading } from '../../components/ui/Loading';
+import { colors } from '../../constants/theme';
+import { ApiRequestError } from '../../lib/api';
 
 export default function StockDetailScreen() {
   const { ticker } = useLocalSearchParams<{ ticker: string }>();
-  const { currentAnalysis, isAnalyzing, error, analyze } = useAnalysisStore();
+  const normalizedTicker = (ticker ?? '').toUpperCase();
+  const { data, error, isFetching, refetch } = useAnalysisQuery(normalizedTicker);
+  const unavailablePayload = error instanceof ApiRequestError ? error.payload : null;
 
-  useEffect(() => {
-    if (ticker) {
-      analyze(ticker);
-    }
-  }, [ticker]);
-
-  if (isAnalyzing && !currentAnalysis) {
+  if (isFetching && !data) {
     return (
       <>
-        <Stack.Screen options={{ title: ticker || 'Stock' }} />
-        <Loading fullScreen message={`Loading ${ticker}...`} />
+        <Stack.Screen options={{ title: normalizedTicker || 'Stock' }} />
+        <Loading fullScreen message={`Loading ${normalizedTicker}...`} />
       </>
     );
   }
@@ -29,22 +26,31 @@ export default function StockDetailScreen() {
   if (error) {
     return (
       <>
-        <Stack.Screen options={{ title: ticker || 'Stock' }} />
-        <View style={styles.errorContainer}>
-          <Ionicons name="alert-circle" size={48} color={colors.error} />
-          <Text style={styles.errorText}>{error}</Text>
+        <Stack.Screen options={{ title: normalizedTicker || 'Stock' }} />
+        <View style={styles.container}>
+          <StatePanel
+            icon={unavailablePayload?.status === 'unavailable' ? 'ban-outline' : 'cloud-offline-outline'}
+            title={unavailablePayload?.status === 'unavailable' ? `${normalizedTicker} unavailable` : 'Analysis failed'}
+            message={
+              unavailablePayload?.status === 'unavailable' && unavailablePayload?.missing_inputs?.length
+                ? `${error.message} Missing inputs: ${unavailablePayload.missing_inputs.join(', ')}`
+                : error.message
+            }
+            actionLabel="Retry"
+            onAction={() => refetch()}
+            tone={unavailablePayload?.status === 'unavailable' ? 'warning' : 'error'}
+          />
         </View>
       </>
     );
   }
 
-  if (!currentAnalysis) {
+  if (!data) {
     return (
       <>
-        <Stack.Screen options={{ title: ticker || 'Stock' }} />
-        <View style={styles.errorContainer}>
-          <Ionicons name="search-outline" size={48} color={colors.textMuted} />
-          <Text style={styles.errorText}>Stock not found</Text>
+        <Stack.Screen options={{ title: normalizedTicker || 'Stock' }} />
+        <View style={styles.container}>
+          <StatePanel icon="search-outline" title="No analysis" message="No analysis is available for this ticker yet." />
         </View>
       </>
     );
@@ -52,9 +58,9 @@ export default function StockDetailScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: currentAnalysis.ticker }} />
+      <Stack.Screen options={{ title: data.ticker }} />
       <View style={styles.container}>
-        <StockAnalysisContent analysis={currentAnalysis} />
+        <StockAnalysisContent analysis={data} />
       </View>
     </>
   );
@@ -62,20 +68,7 @@ export default function StockDetailScreen() {
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
     backgroundColor: colors.background,
-  },
-  errorContainer: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.background,
-    padding: spacing.xl,
-  },
-  errorText: {
-    color: colors.textSecondary,
-    fontSize: fontSize.md,
-    marginTop: spacing.md,
-    textAlign: 'center',
   },
 });

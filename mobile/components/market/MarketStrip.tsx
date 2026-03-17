@@ -91,6 +91,7 @@ function MarketIndexItem({ index, onPress, itemIndex }: MarketIndexItemProps) {
     <>
       {/* Symbol */}
       <Text style={styles.symbol}>{index.symbol}</Text>
+      <Text style={styles.name} numberOfLines={1}>{index.name}</Text>
 
       {/* Price */}
       <Text style={styles.price}>{formatPrice(index.price)}</Text>
@@ -120,7 +121,7 @@ function MarketIndexItem({ index, onPress, itemIndex }: MarketIndexItemProps) {
       >
         <GlassView
           style={styles.glassItem}
-          glassEffectStyle="regular"
+          glassEffectStyle="clear"
           isInteractive
         >
           {itemContent}
@@ -263,6 +264,13 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.sansBold,
     letterSpacing: 0.5,
     marginBottom: spacing.xs,
+  },
+  name: {
+    color: colors.textSecondary,
+    fontSize: fontSize.xs,
+    fontFamily: fontFamily.sans,
+    marginBottom: spacing.xs,
+    textAlign: 'center',
   },
   price: {
     color: colors.text,

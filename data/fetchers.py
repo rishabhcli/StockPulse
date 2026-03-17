@@ -20,6 +20,32 @@ logger = logging.getLogger(__name__)
 
 # ============== Helper Functions ==============
 
+def _payload_available(payload: Any) -> bool:
+    """Return True when a fetched payload contains usable data."""
+    if payload is None:
+        return False
+    if isinstance(payload, pd.DataFrame):
+        return not payload.empty
+    if isinstance(payload, dict):
+        return bool(payload)
+    if isinstance(payload, (list, tuple, set)):
+        return len(payload) > 0
+    if isinstance(payload, (int, float)):
+        return payload > 0
+    return True
+
+
+def _source_entry(name: str, source: str, payload: Any, error: Optional[str] = None, stale: bool = False) -> Dict[str, Any]:
+    """Build normalized metadata for a fetched input."""
+    return {
+        'name': name,
+        'available': _payload_available(payload),
+        'source': source,
+        'fetched_at': datetime.utcnow().isoformat(),
+        'stale': stale,
+        'error': error,
+    }
+
 def normalize_ticker(ticker: str) -> str:
     """
     Normalize ticker symbol - add ^ prefix for index symbols if missing.
@@ -38,6 +64,28 @@ def normalize_ticker(ticker: str) -> str:
     if ticker_upper in INDEX_SYMBOLS:
         return f'^{ticker_upper}'
     return ticker_upper
+
+
+def classify_instrument(symbol: str, info: Optional[Dict[str, Any]] = None) -> str:
+    """Classify a symbol into equity, etf, index, or unknown."""
+    symbol = normalize_ticker(symbol)
+    info = info or {}
+
+    if symbol.startswith('^'):
+        return 'index'
+
+    quote_type = str(info.get('quoteType', '')).lower()
+    if quote_type in {'etf', 'mutualfund'}:
+        return 'etf'
+    if quote_type == 'index':
+        return 'index'
+    if quote_type in {'equity', 'stock'}:
+        return 'equity'
+    if info.get('fundFamily'):
+        return 'etf'
+    if info.get('sector') or info.get('marketCap'):
+        return 'equity'
+    return 'unknown'
 
 
 # ============== Stooq Data Source ==============
@@ -419,32 +467,73 @@ def get_all_stock_data(symbol: str) -> Dict[str, Any]:
     """
     symbol = normalize_ticker(symbol)
 
-    data = {
-        'ticker': symbol,
-        'timestamp': datetime.now().isoformat(),
-        'history': get_cached_history(symbol, period="1y"),
-        'info': get_cached_info(symbol),
-        'news': get_cached_news(symbol),
-        'calendar': get_cached_calendar(symbol),
-        'financials': get_cached_financials(symbol),
-        'holders': get_cached_holders(symbol),
-        'recommendations': get_cached_recommendations(symbol),
+    history = get_cached_history(symbol, period="1y")
+    info = get_cached_info(symbol)
+    news = get_cached_news(symbol)
+    calendar = get_cached_calendar(symbol)
+    financials = get_cached_financials(symbol)
+    holders = get_cached_holders(symbol)
+    recommendations = get_cached_recommendations(symbol)
+
+    current_price = None
+    if _payload_available(history):
+        current_price = float(history['Close'].iloc[-1])
+    elif info:
+        current_price = info.get('currentPrice') or info.get('regularMarketPrice')
+
+    sources = {
+        'history': _source_entry('history', 'stooq/yfinance', history, None if _payload_available(history) else 'history_unavailable'),
+        'info': _source_entry('info', 'yfinance', info, None if _payload_available(info) else 'info_unavailable'),
+        'news': _source_entry('news', 'yfinance', news, None if _payload_available(news) else 'news_unavailable'),
+        'calendar': _source_entry('calendar', 'yfinance', calendar, None if _payload_available(calendar) else 'calendar_unavailable'),
+        'financials': _source_entry(
+            'financials',
+            'yfinance',
+            financials if financials.get('data_available') else None,
+            None if financials.get('data_available') else 'financials_unavailable'
+        ),
+        'holders': _source_entry(
+            'holders',
+            'yfinance',
+            holders if holders.get('data_available') else None,
+            None if holders.get('data_available') else 'holders_unavailable'
+        ),
+        'recommendations': _source_entry(
+            'recommendations',
+            'yfinance',
+            recommendations,
+            None if _payload_available(recommendations) else 'recommendations_unavailable'
+        ),
+        'quote': _source_entry(
+            'quote',
+            'history/info',
+            current_price,
+            None if current_price is not None else 'quote_unavailable'
+        ),
     }
 
-    # Extract current price
-    if not data['history'].empty:
-        data['current_price'] = data['history']['Close'].iloc[-1]
-    elif data['info']:
-        data['current_price'] = data['info'].get('currentPrice') or data['info'].get('regularMarketPrice', 0)
-    else:
-        data['current_price'] = 0
-
-    return data
+    return {
+        'ticker': symbol,
+        'timestamp': datetime.utcnow().isoformat(),
+        'history': history,
+        'info': info,
+        'news': news,
+        'calendar': calendar,
+        'financials': financials,
+        'holders': holders,
+        'recommendations': recommendations,
+        'current_price': current_price,
+        'sources': sources,
+        'sources_checked': list(sources.keys()),
+        'instrument_type': classify_instrument(symbol, info),
+        'stale_inputs': [name for name, meta in sources.items() if meta.get('stale')],
+        'missing_inputs': [name for name, meta in sources.items() if not meta.get('available')],
+    }
 
 
 # ============== Market Data ==============
 
-def get_vix() -> float:
+def get_vix() -> Optional[float]:
     """Get current VIX (volatility index) value."""
     try:
         vix_data = get_cached_history("^VIX", period="5d")
@@ -452,7 +541,7 @@ def get_vix() -> float:
             return vix_data['Close'].iloc[-1]
     except Exception as e:
         logger.debug(f"VIX fetch failed: {e}")
-    return 20.0  # Default moderate VIX
+    return None
 
 
 def get_market_data() -> Dict[str, Any]:
@@ -468,29 +557,79 @@ def get_market_data() -> Dict[str, Any]:
     if cached is not None:
         return cached
 
+    vix = get_vix()
+    tracked_symbols = ['SPY', 'QQQ', 'IWM', 'RSP', 'XLY', 'XLP', 'HYG', 'TLT']
     market_data = {
-        'vix': get_vix(),
+        'vix': vix,
         'spy': {},
         'qqq': {},
         'iwm': {},
-        'timestamp': datetime.now().isoformat()
+        'rsp': {},
+        'xly': {},
+        'xlp': {},
+        'hyg': {},
+        'tlt': {},
+        'timestamp': datetime.utcnow().isoformat(),
+        'sources': {
+            'vix': _source_entry('vix', 'stooq/yfinance', vix, None if vix is not None else 'vix_unavailable'),
+        },
     }
 
-    for symbol in ['SPY', 'QQQ', 'IWM']:
+    for symbol in tracked_symbols:
         try:
             hist = get_cached_history(symbol, period="6mo")
             if not hist.empty:
                 close = hist['Close']
+                sma_20 = close.rolling(20).mean().iloc[-1] if len(close) >= 20 else close.mean()
+                sma_50 = close.rolling(50).mean().iloc[-1] if len(close) >= 50 else close.mean()
+                sma_200 = close.rolling(200).mean().iloc[-1] if len(close) >= 200 else close.mean()
                 market_data[symbol.lower()] = {
                     'price': close.iloc[-1],
-                    'sma_20': close.rolling(20).mean().iloc[-1],
-                    'sma_50': close.rolling(50).mean().iloc[-1],
-                    'sma_200': close.rolling(200).mean().iloc[-1] if len(close) >= 200 else close.mean(),
+                    'sma_20': sma_20,
+                    'sma_50': sma_50,
+                    'sma_200': sma_200,
                     'change_1d': (close.iloc[-1] / close.iloc[-2] - 1) * 100 if len(close) > 1 else 0,
                     'change_1m': (close.iloc[-1] / close.iloc[-20] - 1) * 100 if len(close) >= 20 else 0,
+                    'above_50dma': bool(close.iloc[-1] > sma_50) if sma_50 else False,
+                    'above_200dma': bool(close.iloc[-1] > sma_200) if sma_200 else False,
                 }
+                market_data['sources'][symbol.lower()] = _source_entry(symbol.lower(), 'stooq/yfinance', hist)
+            else:
+                market_data['sources'][symbol.lower()] = _source_entry(symbol.lower(), 'stooq/yfinance', hist, f'{symbol.lower()}_unavailable')
         except Exception as e:
             logger.debug(f"Market data fetch failed for {symbol}: {e}")
+            market_data['sources'][symbol.lower()] = _source_entry(symbol.lower(), 'stooq/yfinance', None, str(e))
+
+    breadth_components = [market_data.get(key, {}) for key in ['spy', 'qqq', 'iwm', 'rsp']]
+    breadth_scores = [
+        1.0 if component.get('above_50dma') else 0.0
+        for component in breadth_components
+        if component
+    ]
+    if breadth_scores:
+        market_data['breadth'] = round((sum(breadth_scores) / len(breadth_scores)) * 100, 1)
+
+    market_data['risk_proxies'] = {
+        'small_vs_large': (market_data.get('iwm', {}).get('change_1m', 0) - market_data.get('spy', {}).get('change_1m', 0)),
+        'equal_weight_vs_cap_weight': (market_data.get('rsp', {}).get('change_1m', 0) - market_data.get('spy', {}).get('change_1m', 0)),
+        'consumer_discretionary_vs_staples': (market_data.get('xly', {}).get('change_1m', 0) - market_data.get('xlp', {}).get('change_1m', 0)),
+        'credit_vs_duration': (market_data.get('hyg', {}).get('change_1m', 0) - market_data.get('tlt', {}).get('change_1m', 0)),
+    }
+
+    try:
+        from data.economic_calendar import get_economic_context
+        economic_context = get_economic_context()
+        market_data['economic_context'] = economic_context
+        market_data['sources']['economic_context'] = _source_entry(
+            'economic_context',
+            'fred',
+            economic_context if getattr(economic_context, 'api_available', False) else None,
+            getattr(economic_context, 'error', None)
+        )
+    except Exception as e:
+        logger.debug(f"Economic context fetch failed: {e}")
+        market_data['economic_context'] = None
+        market_data['sources']['economic_context'] = _source_entry('economic_context', 'fred', None, str(e))
 
     cache.set(cache_key, market_data, ttl=TickerCache.TTL_MARKET)
     return market_data

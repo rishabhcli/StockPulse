@@ -67,10 +67,12 @@ class QualityGateAnalyzer(BaseAnalyzer):
 
         if not has_financials and not info:
             return QualityGateResult(
-                passed=True,  # Pass by default if no data
+                passed=None,
                 flags=[],
                 confidence=0.2,
-                data_quality='insufficient'
+                data_quality='insufficient',
+                status='unknown',
+                reason='Financial statements unavailable',
             )
 
         # ============== Accounting Quality Checks ==============
@@ -209,6 +211,8 @@ class QualityGateAnalyzer(BaseAnalyzer):
             flags=flags,
             confidence=confidence,
             data_quality='complete' if has_financials else 'partial',
+            status='available' if has_financials else 'unknown',
+            reason='' if has_financials else 'Financial statements incomplete',
             altman_z_score=metrics.get('altman_z_score'),
             current_ratio=metrics.get('current_ratio'),
             interest_coverage=metrics.get('interest_coverage'),

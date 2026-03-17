@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const CACHE_PREFIX = 'stockpulse_cache_';
+const QUERY_CACHE_KEY = 'stockpulse_react_query_cache';
 const DEFAULT_TTL = 30 * 60 * 1000; // 30 minutes
 
 interface CacheEntry<T> {
@@ -44,3 +45,27 @@ export async function clearCache(): Promise<void> {
     // Silently fail
   }
 }
+
+export const queryStorage = {
+  getItem: async (key: string) => {
+    try {
+      return await AsyncStorage.getItem(`${QUERY_CACHE_KEY}:${key}`);
+    } catch {
+      return null;
+    }
+  },
+  setItem: async (key: string, value: string) => {
+    try {
+      await AsyncStorage.setItem(`${QUERY_CACHE_KEY}:${key}`, value);
+    } catch {
+      // Best effort
+    }
+  },
+  removeItem: async (key: string) => {
+    try {
+      await AsyncStorage.removeItem(`${QUERY_CACHE_KEY}:${key}`);
+    } catch {
+      // Best effort
+    }
+  },
+};

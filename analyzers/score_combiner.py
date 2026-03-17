@@ -20,6 +20,8 @@ Extended Data Sources (v2.1):
 
 from typing import Dict, Any, Optional, List, Tuple
 import logging
+import json
+import os
 
 from analyzers.base import BaseAnalyzer
 from analyzers.quality_gate import QualityGateAnalyzer
@@ -50,45 +52,86 @@ class ScoreCombiner:
     individual indicator values.
     """
 
-    # Score thresholds for recommendations
-    STRONG_BUY_THRESHOLD = 75
-    BUY_THRESHOLD = 60
-    HOLD_THRESHOLD = 45
-    SELL_THRESHOLD = 30
-
-    # Quality gate failure cap
-    QUALITY_FAIL_CAP = 40
-
-    # Agreement bonuses/penalties
-    STRONG_AGREEMENT_BONUS = 15
-    MODERATE_AGREEMENT_BONUS = 8
-    CONFLICT_PENALTY = 10
-    MAJOR_CONFLICT_PENALTY = 15
-
-    # Catalyst adjustments
-    IMMINENT_CATALYST_UNCERTAINTY = 8
-    NEAR_CATALYST_UNCERTAINTY = 5
-
-    # Insider trading adjustments
-    CLUSTER_BUYING_BONUS = 10  # 3+ insiders buying
-    EXECUTIVE_BUYING_BONUS = 5  # CEO/CFO buying
-    HEAVY_SELLING_PENALTY = 5  # Heavy insider selling
-
-    # Short interest adjustments
-    SQUEEZE_POTENTIAL_BONUS = 5  # High short + rising price
-    CROWDED_SHORT_FLAG = 5  # >20% of float shorted
-
-    # Relative strength adjustments
-    OUTPERFORMING_BONUS = 5  # RS > +5% vs sector
-    UNDERPERFORMING_PENALTY = 5  # RS < -5% vs sector
+    DEFAULT_CONFIG_PATH = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), '..', 'config', 'scoring_v3.json')
+    )
 
     def __init__(self):
         """Initialize all layer analyzers."""
+        self.config = self._load_config()
+        self._apply_config()
         self.quality_gate = QualityGateAnalyzer()
         self.intrinsic_value = IntrinsicValueAnalyzer()
         self.market_regime = MarketRegimeAnalyzer()
         self.technical_confluence = TechnicalConfluenceAnalyzer()
         self.catalyst = CatalystAnalyzer()
+
+    def _load_config(self) -> Dict[str, Any]:
+        config_path = os.environ.get('STOCKPULSE_SCORING_CONFIG', self.DEFAULT_CONFIG_PATH)
+        try:
+            with open(config_path, 'r', encoding='utf-8') as config_file:
+                return json.load(config_file)
+        except Exception as exc:
+            logger.warning(f"Unable to load scoring config at {config_path}: {exc}")
+            return {
+                'recommendation_thresholds': {
+                    'default': {'strong_buy': 75, 'buy': 60, 'hold': 45, 'sell': 30},
+                },
+                'confidence_thresholds': {'high': 0.75, 'medium': 0.5},
+                'adjustments': {
+                    'quality_fail_cap': 40,
+                    'strong_agreement_bonus': 15,
+                    'moderate_agreement_bonus': 8,
+                    'conflict_penalty': 10,
+                    'major_conflict_penalty': 15,
+                    'imminent_catalyst_uncertainty': 8,
+                    'near_catalyst_uncertainty': 5,
+                    'cluster_buying_bonus': 10,
+                    'executive_buying_bonus': 5,
+                    'heavy_selling_penalty': 5,
+                    'squeeze_potential_bonus': 5,
+                    'crowded_short_flag': 5,
+                    'outperforming_bonus': 5,
+                    'underperforming_penalty': 5,
+                },
+                'instrument_weights': {
+                    'default': {'technical_scale_divisor': 2.0, 'relative_strength_scale_divisor': 3.0},
+                },
+            }
+
+    def _apply_config(self):
+        adjustments = self.config.get('adjustments', {})
+        self.QUALITY_FAIL_CAP = adjustments.get('quality_fail_cap', 40)
+        self.STRONG_AGREEMENT_BONUS = adjustments.get('strong_agreement_bonus', 15)
+        self.MODERATE_AGREEMENT_BONUS = adjustments.get('moderate_agreement_bonus', 8)
+        self.CONFLICT_PENALTY = adjustments.get('conflict_penalty', 10)
+        self.MAJOR_CONFLICT_PENALTY = adjustments.get('major_conflict_penalty', 15)
+        self.IMMINENT_CATALYST_UNCERTAINTY = adjustments.get('imminent_catalyst_uncertainty', 8)
+        self.NEAR_CATALYST_UNCERTAINTY = adjustments.get('near_catalyst_uncertainty', 5)
+        self.CLUSTER_BUYING_BONUS = adjustments.get('cluster_buying_bonus', 10)
+        self.EXECUTIVE_BUYING_BONUS = adjustments.get('executive_buying_bonus', 5)
+        self.HEAVY_SELLING_PENALTY = adjustments.get('heavy_selling_penalty', 5)
+        self.SQUEEZE_POTENTIAL_BONUS = adjustments.get('squeeze_potential_bonus', 5)
+        self.CROWDED_SHORT_FLAG = adjustments.get('crowded_short_flag', 5)
+        self.OUTPERFORMING_BONUS = adjustments.get('outperforming_bonus', 5)
+        self.UNDERPERFORMING_PENALTY = adjustments.get('underperforming_penalty', 5)
+        self.confidence_thresholds = self.config.get('confidence_thresholds', {'high': 0.75, 'medium': 0.5})
+
+    def _get_thresholds(self, instrument_type: str) -> Dict[str, float]:
+        thresholds = self.config.get('recommendation_thresholds', {})
+        return thresholds.get(instrument_type, thresholds.get('default', {
+            'strong_buy': 75,
+            'buy': 60,
+            'hold': 45,
+            'sell': 30,
+        }))
+
+    def _get_instrument_weights(self, instrument_type: str) -> Dict[str, float]:
+        weights = self.config.get('instrument_weights', {})
+        return weights.get(instrument_type, weights.get('default', {
+            'technical_scale_divisor': 2.0,
+            'relative_strength_scale_divisor': 3.0,
+        }))
 
     def analyze_all_layers(
         self,
@@ -107,22 +150,42 @@ class ScoreCombiner:
         Returns:
             LayerResults containing all layer outputs
         """
-        # Layer 1: Quality Gate
-        quality_result = self.quality_gate.analyze(ticker, {
-            'info': stock_data.get('info', {}),
-            'financials': stock_data.get('financials', {})
-        })
+        instrument_type = stock_data.get('instrument_type', 'unknown')
 
-        # Layer 2: Intrinsic Value
-        value_result = self.intrinsic_value.analyze(ticker, {
-            'info': stock_data.get('info', {}),
-            'financials': stock_data.get('financials', {}),
-            'history': stock_data.get('history')
-        })
+        if instrument_type == 'equity':
+            quality_result = self.quality_gate.analyze(ticker, {
+                'info': stock_data.get('info', {}),
+                'financials': stock_data.get('financials', {})
+            })
+
+            value_result = self.intrinsic_value.analyze(ticker, {
+                'info': stock_data.get('info', {}),
+                'financials': stock_data.get('financials', {}),
+                'history': stock_data.get('history'),
+                'current_price': stock_data.get('current_price'),
+            })
+        else:
+            quality_result = QualityGateResult(
+                passed=None,
+                confidence=0.0,
+                data_quality='not_applicable',
+                status='not_applicable',
+                applicable=False,
+                reason='Quality gate applies to equities only',
+            )
+            value_result = IntrinsicValueResult(
+                current_price=stock_data.get('current_price') or 0.0,
+                conviction=0.0,
+                status='not_applicable',
+                applicable=False,
+                data_quality='not_applicable',
+                reason='Intrinsic valuation is disabled for non-equities',
+            )
 
         # Layer 3: Market Regime
         regime_result = self.market_regime.analyze(ticker, {
-            'market_data': market_data
+            'market_data': market_data,
+            'economic_context': market_data.get('economic_context'),
         })
 
         # Layer 4: Technical Confluence
@@ -168,12 +231,13 @@ class ScoreCombiner:
         # Run all layers
         layers = self.analyze_all_layers(ticker, stock_data, market_data)
 
-        # 1. Check quality gate first
-        if not layers.quality_gate.passed:
+        # 1. Check quality gate first for equities only.
+        if layers.quality_gate.applicable and layers.quality_gate.passed is False:
             return self._create_quality_fail_score(ticker, layers)
 
         # 2. Calculate base score from value and technical
-        base_score = self._calculate_base_score(layers)
+        instrument_type = stock_data.get('instrument_type', 'unknown')
+        base_score = self._calculate_base_score(layers, stock_data, instrument_type)
 
         # 3. Apply layer agreement adjustment
         agreement_adj, agreement_level = self._calculate_agreement_adjustment(layers)
@@ -202,7 +266,7 @@ class ScoreCombiner:
         final_score = max(1, min(100, final_score))  # Clamp to 1-100
 
         # 8. Determine recommendation
-        recommendation = self._score_to_recommendation(final_score)
+        recommendation = self._score_to_recommendation(final_score, instrument_type)
 
         # 9. Calculate confidence
         confidence = self._calculate_confidence(layers, agreement_level)
@@ -220,7 +284,7 @@ class ScoreCombiner:
             layer_results=layers,
             agreement_level=agreement_level,
             explanation=explanation,
-            scoring_version='v2'
+            scoring_version='v3'
         )
 
     def _create_quality_fail_score(
@@ -232,10 +296,7 @@ class ScoreCombiner:
         flags = layers.quality_gate.flags
 
         # Score based on severity
-        critical_count = len([f for f in flags if 'CRITICAL' in f or f in [
-            'negative_cash_flow', 'high_receivables_growth', 'altman_z_distress',
-            'interest_coverage_weak', 'excessive_debt'
-        ]])
+        critical_count = len([f for f in flags if getattr(f, 'severity', '') == 'critical'])
 
         score = max(20, self.QUALITY_FAIL_CAP - (critical_count * 5))
 
@@ -246,35 +307,40 @@ class ScoreCombiner:
             layer_results=layers,
             agreement_level=0.0,
             explanation=f"Quality gate failed: {', '.join(flags[:3])}",
-            scoring_version='v2'
+            scoring_version='v3'
         )
 
-    def _calculate_base_score(self, layers: LayerResults) -> float:
+    def _calculate_base_score(
+        self,
+        layers: LayerResults,
+        stock_data: Dict[str, Any],
+        instrument_type: str,
+    ) -> float:
         """Calculate base score from value and technical layers."""
-        # Start with neutral 50
         score = 50.0
+        weights = self._get_instrument_weights(instrument_type)
 
         # Value contribution (up to +/- 25 points)
-        value_signal = layers.intrinsic_value.valuation_signal
-        margin = layers.intrinsic_value.margin_of_safety
+        if layers.intrinsic_value.applicable and layers.intrinsic_value.status == 'available':
+            value_signal = layers.intrinsic_value.valuation_signal
+            margin = layers.intrinsic_value.margin_of_safety
 
-        if value_signal == 'UNDERVALUED':
-            # More undervalued = higher score
-            value_contribution = min(25, margin * 50)  # 50% MoS = +25
-        elif value_signal == 'OVERVALUED':
-            # More overvalued = lower score
-            value_contribution = max(-25, margin * 50)  # Already negative
-        else:
-            value_contribution = 0
-
-        score += value_contribution
+            if value_signal == 'UNDERVALUED':
+                score += min(25, margin * 50)
+            elif value_signal == 'OVERVALUED':
+                score += max(-25, margin * 50)
 
         # Technical contribution (up to +/- 25 points)
-        tech_score = layers.technical_confluence.confluence_score
-        # Map 0-100 technical to -25 to +25 contribution
-        tech_contribution = (tech_score - 50) / 2
+        if layers.technical_confluence.status == 'available':
+            tech_score = layers.technical_confluence.confluence_score
+            score += (tech_score - 50) / weights.get('technical_scale_divisor', 2.0)
 
-        score += tech_contribution
+        # Relative strength matters more for ETFs and indices.
+        rs_data = stock_data.get('relative_strength')
+        if rs_data is not None:
+            rs_score = getattr(rs_data, 'strength_score', None)
+            if rs_score is not None:
+                score += (rs_score - 50) / weights.get('relative_strength_scale_divisor', 3.0)
 
         return score
 
@@ -290,29 +356,32 @@ class ScoreCombiner:
         """
         signals = []
 
-        # Value signal
-        if layers.intrinsic_value.valuation_signal == 'UNDERVALUED':
-            signals.append(1)
-        elif layers.intrinsic_value.valuation_signal == 'OVERVALUED':
-            signals.append(-1)
-        else:
-            signals.append(0)
+        if layers.intrinsic_value.applicable and layers.intrinsic_value.status == 'available':
+            if layers.intrinsic_value.valuation_signal == 'UNDERVALUED':
+                signals.append(1)
+            elif layers.intrinsic_value.valuation_signal == 'OVERVALUED':
+                signals.append(-1)
+            else:
+                signals.append(0)
 
         # Technical signal
-        if layers.technical_confluence.trend_alignment == 'ALIGNED_UP':
+        if layers.technical_confluence.status == 'available' and layers.technical_confluence.trend_alignment == 'ALIGNED_UP':
             signals.append(1)
-        elif layers.technical_confluence.trend_alignment == 'ALIGNED_DOWN':
+        elif layers.technical_confluence.status == 'available' and layers.technical_confluence.trend_alignment == 'ALIGNED_DOWN':
             signals.append(-1)
-        else:
+        elif layers.technical_confluence.status == 'available':
             signals.append(0)
 
         # Catalyst sentiment
-        if layers.catalyst.catalyst_sentiment == 'POSITIVE':
+        if layers.catalyst.status == 'available' and layers.catalyst.catalyst_sentiment == 'POSITIVE':
             signals.append(1)
-        elif layers.catalyst.catalyst_sentiment == 'NEGATIVE':
+        elif layers.catalyst.status == 'available' and layers.catalyst.catalyst_sentiment == 'NEGATIVE':
             signals.append(-1)
-        else:
+        elif layers.catalyst.status == 'available':
             signals.append(0)
+
+        if not signals:
+            return (0, 0.2)
 
         # Calculate agreement
         bullish_count = sum(1 for s in signals if s > 0)
@@ -350,26 +419,29 @@ class ScoreCombiner:
         # In crisis, be more conservative
         if regime == 'CRISIS':
             # Reduce bullish scores, increase bearish
-            if layers.intrinsic_value.valuation_signal == 'UNDERVALUED':
+            if layers.intrinsic_value.applicable and layers.intrinsic_value.status == 'available' and layers.intrinsic_value.valuation_signal == 'UNDERVALUED':
                 return -5  # Even undervalued stocks risky in crisis
             return 0
 
         # In risk-on, momentum matters more
         if regime == 'RISK_ON':
-            if layers.technical_confluence.trend_alignment == 'ALIGNED_UP':
+            if layers.technical_confluence.status == 'available' and layers.technical_confluence.trend_alignment == 'ALIGNED_UP':
                 return 5  # Boost bullish technicals
-            elif layers.technical_confluence.trend_alignment == 'ALIGNED_DOWN':
+            elif layers.technical_confluence.status == 'available' and layers.technical_confluence.trend_alignment == 'ALIGNED_DOWN':
                 return -3  # Slight penalty for fighting the trend
 
         # In recovery, favor value
         if regime == 'RECOVERY':
-            if layers.intrinsic_value.valuation_signal == 'UNDERVALUED':
+            if layers.intrinsic_value.applicable and layers.intrinsic_value.status == 'available' and layers.intrinsic_value.valuation_signal == 'UNDERVALUED':
                 return 5  # Value plays in recovery
 
         return 0
 
     def _calculate_catalyst_adjustment(self, layers: LayerResults) -> float:
         """Calculate uncertainty penalty for imminent catalysts."""
+        if layers.catalyst.status != 'available':
+            return 0
+
         days_to_nearest = layers.catalyst.days_to_nearest
 
         # Imminent catalyst (within 7 days) = high uncertainty
@@ -455,15 +527,17 @@ class ScoreCombiner:
 
         return 0
 
-    def _score_to_recommendation(self, score: float) -> str:
+    def _score_to_recommendation(self, score: float, instrument_type: str = 'default') -> str:
         """Convert score to recommendation string."""
-        if score >= self.STRONG_BUY_THRESHOLD:
+        thresholds = self._get_thresholds(instrument_type)
+
+        if score >= thresholds['strong_buy']:
             return 'STRONG BUY'
-        elif score >= self.BUY_THRESHOLD:
+        elif score >= thresholds['buy']:
             return 'BUY'
-        elif score >= self.HOLD_THRESHOLD:
+        elif score >= thresholds['hold']:
             return 'HOLD'
-        elif score >= self.SELL_THRESHOLD:
+        elif score >= thresholds['sell']:
             return 'SELL'
         else:
             return 'STRONG SELL'
@@ -479,12 +553,20 @@ class ScoreCombiner:
         # 2. Data quality (from each layer's confidence)
         # 3. Catalyst uncertainty
 
-        confidences = [
-            layers.quality_gate.confidence,
-            layers.intrinsic_value.conviction,
-            layers.market_regime.confidence,
-            layers.technical_confluence.confidence
-        ]
+        confidences: List[float] = []
+        if layers.quality_gate.applicable and layers.quality_gate.status == 'available':
+            confidences.append(layers.quality_gate.confidence)
+        if layers.intrinsic_value.applicable and layers.intrinsic_value.status == 'available':
+            confidences.append(layers.intrinsic_value.conviction)
+        if layers.market_regime.status == 'available':
+            confidences.append(layers.market_regime.confidence)
+        if layers.technical_confluence.status == 'available':
+            confidences.append(layers.technical_confluence.confidence)
+        if layers.catalyst.status == 'available':
+            confidences.append(max(0.0, 1 - layers.catalyst.risk_factor))
+
+        if not confidences:
+            return 'LOW'
 
         avg_layer_confidence = sum(confidences) / len(confidences)
 
@@ -492,12 +574,12 @@ class ScoreCombiner:
         overall = (avg_layer_confidence * 0.6) + (agreement_level * 0.4)
 
         # Catalyst uncertainty reduces confidence
-        if layers.catalyst.days_to_nearest <= 7:
+        if layers.catalyst.status == 'available' and layers.catalyst.days_to_nearest <= 7:
             overall *= 0.8
 
-        if overall >= 0.75:
+        if overall >= self.confidence_thresholds.get('high', 0.75):
             return 'HIGH'
-        elif overall >= 0.5:
+        elif overall >= self.confidence_thresholds.get('medium', 0.5):
             return 'MEDIUM'
         else:
             return 'LOW'
@@ -519,7 +601,11 @@ class ScoreCombiner:
 
         # Value assessment
         value = layers.intrinsic_value
-        if value.valuation_signal == 'UNDERVALUED':
+        if not value.applicable:
+            parts.append("valuation not applicable")
+        elif value.status != 'available':
+            parts.append("valuation unavailable")
+        elif value.valuation_signal == 'UNDERVALUED':
             parts.append(f"Undervalued by {abs(value.margin_of_safety)*100:.0f}%")
         elif value.valuation_signal == 'OVERVALUED':
             parts.append(f"Overvalued by {abs(value.margin_of_safety)*100:.0f}%")
@@ -528,7 +614,9 @@ class ScoreCombiner:
 
         # Technical assessment
         tech = layers.technical_confluence
-        if tech.trend_alignment == 'ALIGNED_UP':
+        if tech.status != 'available':
+            parts.append("technical history unavailable")
+        elif tech.trend_alignment == 'ALIGNED_UP':
             parts.append(f"bullish technicals ({len(tech.signals_bullish)} confirming signals)")
         elif tech.trend_alignment == 'ALIGNED_DOWN':
             parts.append(f"bearish technicals ({len(tech.signals_bearish)} warning signals)")
@@ -541,7 +629,7 @@ class ScoreCombiner:
 
         # Catalyst note
         cat = layers.catalyst
-        if cat.days_to_nearest < 30:
+        if cat.status == 'available' and cat.days_to_nearest < 30:
             nearest = cat.nearest_catalyst
             if nearest:
                 parts.append(f"{nearest.catalyst_type.lower()} in {cat.days_to_nearest}d")
