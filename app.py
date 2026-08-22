@@ -3,7 +3,7 @@ from flask_cors import CORS
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import os
@@ -21,11 +21,6 @@ from data.fetchers import (
     get_all_stock_data as fetch_all_stock_data,
     get_market_data as fetch_market_data,
     classify_instrument as classify_fetched_instrument,
-    get_cached_calendar as fetch_cached_calendar,
-    get_cached_history as fetch_cached_history,
-    get_cached_info as fetch_cached_info,
-    get_cached_news as fetch_cached_news,
-    get_stooq_data as fetch_stooq_data,
 )
 
 # Load environment variables
@@ -56,19 +51,6 @@ logger = logging.getLogger(__name__)
 configure_sentry()
 
 app = Flask(__name__, static_folder='static', static_url_path='')
-app.config.update(
-    COMPRESS_MIMETYPES=['application/json', 'text/html', 'text/css', 'application/javascript'],
-    COMPRESS_MIN_SIZE=1024,
-    COMPRESS_LEVEL=6,
-)
-
-try:
-    from flask_compress import Compress
-    Compress(app)
-except ImportError:
-    if os.environ.get('FLASK_ENV', 'development').lower() == 'production':
-        raise
-    logger.warning("flask-compress not installed — response compression disabled")
 
 # ============== REQUEST METRICS ==============
 from lib.metrics import setup_metrics
@@ -86,7 +68,6 @@ try:
         app=app,
         default_limits=["60 per minute"],
         storage_uri=limiter_storage_uri or 'memory://',
-        enabled=os.environ.get('FLASK_ENV', 'development').lower() != 'testing',
     )
 except ImportError:
     if os.environ.get('FLASK_ENV', 'development').lower() == 'production':
@@ -109,7 +90,7 @@ except RuntimeError as exc:
 
 # ============== REQUEST CONTEXT / API ENVELOPES ==============
 def _now_iso():
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.utcnow().isoformat()
 
 
 def _request_payload():
@@ -123,7 +104,7 @@ def _request_payload():
 @app.before_request
 def _set_request_context():
     g.request_id = request.headers.get('X-Request-ID') or uuid.uuid4().hex
-    g.request_started_at = time.perf_counter()
+    g.request_started_at = time.time()
 
 
 @app.after_request
@@ -140,7 +121,7 @@ def _add_request_metadata(response):
         except Exception:
             pass
     if getattr(g, 'request_started_at', None) is not None:
-        duration_ms = (time.perf_counter() - g.request_started_at) * 1000
+        duration_ms = (time.time() - g.request_started_at) * 1000
         response.headers['X-Response-Time'] = f'{duration_ms:.2f}ms'
         log_request(logger, response, duration_ms)
     else:
@@ -156,9 +137,6 @@ def _with_request_id(payload):
 
 
 def _api_response(payload, status=200):
-    if isinstance(payload, dict) and status == 422 and payload.get('status') == 'unavailable':
-        payload = dict(payload)
-        payload.setdefault('code', 'insufficient_core_data')
     return jsonify(_with_request_id(payload)), status
 
 
@@ -246,18 +224,69 @@ def get_cached_ticker(symbol):
 
 
 def get_cached_history(symbol, period="1y"):
-    """Use the canonical single-flight history fetcher."""
-    return fetch_cached_history(symbol, period=period)
+    """Get cached historical data for a ticker (Stooq primary, yfinance backup)"""
+    cache_key = f"history_{symbol}_{period}"
+    cached = _ticker_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    # Try Stooq first (no rate limits)
+    try:
+        period_days = {'1d': 1, '5d': 5, '1mo': 30, '3mo': 90, '6mo': 180, '1y': 365, '2y': 730, '5y': 1825}
+        days = period_days.get(period, 365)
+        stooq_df = get_stooq_data(symbol, days=days)
+        if stooq_df is not None and not stooq_df.empty:
+            stooq_df = stooq_df.copy()
+            stooq_df['Date'] = pd.to_datetime(stooq_df['Date'])
+            stooq_df.set_index('Date', inplace=True)
+            _ticker_cache.set(cache_key, stooq_df, ttl=3600)  # 1 hour cache
+            return stooq_df
+    except Exception as e:
+        pass
+
+    # Fallback to yfinance
+    try:
+        ticker = yf.Ticker(symbol)
+        hist = ticker.history(period=period)
+        if hist is not None and not hist.empty:
+            _ticker_cache.set(cache_key, hist, ttl=3600)  # 1 hour cache
+            return hist
+    except Exception as e:
+        pass
+
+    return pd.DataFrame()  # Return empty DataFrame if both fail
 
 
 def get_cached_info(symbol):
-    """Use the canonical single-flight fundamentals fetcher."""
-    return fetch_cached_info(symbol)
+    """Get cached ticker info (fundamentals)"""
+    cache_key = f"info_{symbol}"
+    cached = _ticker_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    try:
+        ticker = yf.Ticker(symbol)
+        info = ticker.info
+        if info:
+            _ticker_cache.set(cache_key, info, ttl=7200)  # 2 hour cache for info
+            return info
+    except Exception as e:
+        pass
+
+    return {}  # Return empty dict if fails
 
 
 def get_cached_news(symbol):
-    """Use the canonical single-flight news fetcher."""
-    return fetch_cached_news(symbol)
+    """Get cached news for a ticker"""
+    cache_key = f"news_{symbol}"
+    cached = _ticker_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    ticker = yf.Ticker(symbol)
+    news = ticker.news
+    _ticker_cache.set(cache_key, news, ttl=600)  # 10 min cache for news
+    return news
 
 
 # ============== STOOQ DATA SOURCE (No Rate Limits) ==============
@@ -267,7 +296,33 @@ def get_stooq_data(symbol, days=7):
     Fetch stock data from Stooq.com (no rate limits, no API key needed)
     Symbol formats: SPY.US, AAPL.US, ^SPX (for S&P 500 index)
     """
-    return fetch_stooq_data(symbol, days=days)
+    cache_key = f"stooq_{symbol}_{days}"
+    cached = _ticker_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    try:
+        # Stooq symbol mapping
+        stooq_symbol = symbol.upper()
+        if not stooq_symbol.startswith('^'):
+            if not stooq_symbol.endswith('.US'):
+                stooq_symbol = f"{stooq_symbol}.US"
+
+        url = f'https://stooq.com/q/d/l/?s={stooq_symbol}&i=d'
+        response = requests.get(url, timeout=10)
+
+        if response.status_code == 200 and len(response.text) > 50:
+            from io import StringIO
+            df = pd.read_csv(StringIO(response.text))
+            if not df.empty and 'Close' in df.columns:
+                # Get last N days
+                df = df.tail(days)
+                _ticker_cache.set(cache_key, df, ttl=300)  # 5 min cache
+                return df
+    except Exception as e:
+        pass
+
+    return None
 
 
 def get_stooq_quote(symbol):
@@ -385,8 +440,20 @@ def get_quote_with_fallback(symbol):
 
 
 def get_cached_calendar(symbol):
-    """Use the canonical single-flight calendar fetcher."""
-    return fetch_cached_calendar(symbol)
+    """Get cached calendar (earnings dates) for a ticker"""
+    cache_key = f"calendar_{symbol}"
+    cached = _ticker_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    try:
+        ticker = yf.Ticker(symbol)
+        calendar = ticker.calendar
+        _ticker_cache.set(cache_key, calendar, ttl=1800)  # 30 min cache for calendar
+        return calendar
+    except Exception:
+        _ticker_cache.set(cache_key, None, ttl=1800)  # Cache failures too
+        return None
 
 
 def clear_cache():
@@ -3393,7 +3460,7 @@ def _source_meta(name, source, available, error=None, stale=False):
         'name': name,
         'available': bool(available),
         'source': source,
-        'fetched_at': _now_iso(),
+        'fetched_at': datetime.utcnow().isoformat(),
         'stale': stale,
         'error': error,
     }
@@ -3693,7 +3760,7 @@ def _build_unavailable_response(ticker, instrument_type, reason, missing_inputs,
             'stock': stock_sources,
             'market': market_sources,
         },
-        'generated_at': _now_iso(),
+        'generated_at': datetime.utcnow().isoformat(),
     }
 
 
@@ -3734,7 +3801,7 @@ def _build_analysis_response(ticker, stock_data, market_data, conviction_result,
         'current_price': display_indicators.get('current_price'),
         'change_pct': display_indicators.get('price_change_pct'),
         'dollar_change': display_indicators.get('price_change'),
-        'generated_at': _now_iso(),
+        'generated_at': datetime.utcnow().isoformat(),
     }
 
 
@@ -3923,9 +3990,6 @@ def screen_stocks_v3(filter_type='all', limit=20, tickers=None):
     elif filter_type == 'sells':
         filtered = [item for item in eligible_results if item['recommendation'] in {'STRONG SELL', 'SELL'}]
         filtered.sort(key=lambda item: item['score'])
-    elif filter_type == 'holds':
-        filtered = [item for item in eligible_results if item['recommendation'] == 'HOLD']
-        filtered.sort(key=lambda item: item['score'], reverse=True)
     elif filter_type == 'shorts':
         filtered = [item for item in eligible_results if item['recommendation'] in {'STRONG SELL', 'SELL'}]
         filtered.sort(key=lambda item: item['score'])
@@ -4023,7 +4087,7 @@ def get_market_sentiment_v3():
         'yield_curve': economic_context.get('yield_curve') if isinstance(economic_context, dict) else None,
         'fed_stance': economic_context.get('fed_stance') if isinstance(economic_context, dict) else None,
         'sources': market_data.get('sources', {}),
-        'generated_at': _now_iso(),
+        'generated_at': datetime.utcnow().isoformat(),
     }
 
 
@@ -4038,7 +4102,7 @@ def build_snapshot_v3(limit=5):
     )
 
     return {
-        'timestamp': _now_iso(),
+        'timestamp': datetime.utcnow().isoformat(),
         'market_sentiment': market_sentiment,
         'market_indexes': get_market_indexes_v3(),
         'strong_buys': [_screen_result_from_analysis(item) for item in sorted(analyses, key=lambda item: item['score'], reverse=True)[:limit]],
@@ -4132,7 +4196,7 @@ def service_worker():
 @app.route('/api/analyze', methods=['POST'])
 @limiter.limit("10 per minute")
 def analyze():
-    data = _request_payload()
+    data = request.json or {}
     ticker_raw = data.get('ticker', '')
     _ = data.get('scoring', request.args.get('scoring', 'auto'))
 
@@ -4148,44 +4212,17 @@ def analyze():
 @limiter.limit("5 per minute")
 def screen():
     filter_type = request.args.get('filter', 'all')
-    if filter_type not in {'all', 'strong_buys', 'buys', 'holds', 'sells', 'strong_sells', 'shorts'}:
-        return _api_error('Invalid screener filter', code='invalid_input', status=400)
     limit = safe_int(request.args.get('limit', 20), default=20, min_val=1, max_val=100)
     raw_tickers = request.args.get('tickers', '')
-    tickers = None
-    if raw_tickers:
-        requested_tickers = [ticker.strip().upper() for ticker in raw_tickers.split(',') if ticker.strip()]
-        if len(requested_tickers) > 50 or any(validate_ticker(ticker) is None for ticker in requested_tickers):
-            return _api_error('Invalid ticker list', code='invalid_input', status=400)
-        tickers = requested_tickers
+    tickers = [ticker.strip().upper() for ticker in raw_tickers.split(',') if ticker.strip()] if raw_tickers else None
 
-    normalized_tickers = tuple(_unique_tickers(tickers or []))
-    screen_cache_key = f"api:screen:v3:{filter_type}:{limit}:{','.join(normalized_tickers)}"
-    results = dict(_ticker_cache.get_or_load(
-        screen_cache_key,
-        lambda: screen_stocks_v3(filter_type, limit, tickers=list(normalized_tickers) or None),
-        ttl=60,
-    ))
+    results = screen_stocks_v3(filter_type, limit, tickers=tickers)
     results.pop('analyses', None)
-    results.setdefault(
-        'freshness',
-        build_freshness_metadata(
-            generated_at=results.get('generated_at') or _now_iso(),
-            sources_used={},
-            stale_inputs=[],
-            details={'item_count': len(results.get('stocks', []))},
-        ),
-    )
     return _api_response(results)
 
 @app.route('/api/market-sentiment', methods=['GET'])
 def sentiment():
-    payload = _ticker_cache.get_or_load(
-        'api:market-sentiment:v3',
-        get_market_sentiment_v3,
-        ttl=60,
-    )
-    return _api_response(payload)
+    return _api_response(get_market_sentiment_v3())
 
 
 @app.route('/api/reddit-sentiment', methods=['GET'])
@@ -4323,7 +4360,7 @@ def get_backtest_api():
 @app.route('/api/backtest/record', methods=['POST'])
 def record_score_api():
     """Record a score for backtesting (called after analysis)"""
-    data = _request_payload()
+    data = request.json
     ticker = data.get('ticker', '').strip().upper()
     score = data.get('score')
     price = data.get('price')
@@ -4361,7 +4398,7 @@ def speak():
     if not ELEVENLABS_API_KEY:
         return _api_error("ElevenLabs API key not configured", code='invalid_input', status=400)
 
-    data = _request_payload()
+    data = request.json
     text = data.get('text', '')
 
     if not text:
@@ -4483,25 +4520,7 @@ def get_fast_market_sentiment():
 @app.route('/api/snapshot', methods=['GET'])
 def snapshot():
     try:
-        payload = dict(_ticker_cache.get_or_load(
-            'api:snapshot:v3',
-            build_snapshot_v3,
-            ttl=60,
-        ))
-        snapshot_items = sum(
-            len(payload.get(key, []))
-            for key in ('market_indexes', 'strong_buys', 'shorts', 'gainers', 'losers', 'market_news')
-        )
-        payload.setdefault(
-            'freshness',
-            build_freshness_metadata(
-                generated_at=payload.get('generated_at') or payload.get('timestamp') or _now_iso(),
-                sources_used={},
-                stale_inputs=[],
-                details={'item_count': snapshot_items},
-            ),
-        )
-        return _api_response(payload)
+        return _api_response(build_snapshot_v3())
     except Exception as e:
         return _api_response({
             'status': 'error',
@@ -4527,14 +4546,9 @@ def snapshot():
 @app.route('/api/market-indexes', methods=['GET'])
 def market_indexes():
     """Get major market index performance"""
-    indexes = _ticker_cache.get_or_load(
-        'api:market-indexes:v3',
-        get_market_indexes_v3,
-        ttl=60,
-    )
     indexes_payload = {
-        'indexes': indexes,
-        'timestamp': _now_iso(),
+        'indexes': get_market_indexes_v3(),
+        'timestamp': datetime.utcnow().isoformat(),
         'freshness': build_freshness_metadata(
             sources_used={'market': fetch_market_data().get('sources', {})},
             generated_at=_now_iso(),
@@ -4548,14 +4562,11 @@ def market_indexes():
 def earnings_calendar():
     try:
         limit = safe_int(request.args.get('limit', 50), default=50, min_val=1, max_val=100)
-        earnings_data = _ticker_cache.get_or_load(
-            f'api:earnings-calendar:v3:{limit}',
-            lambda: get_live_earnings_calendar_v3(limit=limit),
-            ttl=300,
-        )
+        earnings_data = get_live_earnings_calendar_v3(limit=limit)
         freshness = build_freshness_metadata(
             sources_used={'calendar': {'earnings': {'available': bool(earnings_data)}}},
             generated_at=_now_iso(),
+            items=earnings_data,
             details={'item_count': len(earnings_data)},
         )
         return _api_response({
@@ -4575,7 +4586,7 @@ def earnings_calendar():
             'freshness': build_freshness_metadata(
                 sources_used={'calendar': {'earnings': {'available': False}}},
                 generated_at=_now_iso(),
-                status='partial',
+                items=[],
                 details={'item_count': 0},
             ),
         }, status=500)
@@ -5023,7 +5034,7 @@ def trading_sim_reset():
 @require_auth
 def trading_sim_manual_trade():
     """Execute a manual (human-initiated) trade that overrides AI control"""
-    data = _request_payload()
+    data = request.get_json()
     if not data:
         return _api_error('Request body required', code='invalid_input', status=400)
 
@@ -5071,7 +5082,7 @@ def trading_sim_manual_trade():
 @require_auth
 def trading_sim_close_position():
     """Close an existing position (human override)"""
-    data = _request_payload()
+    data = request.get_json()
     ticker = data.get('ticker', '').upper()
 
     if not ticker:
@@ -5147,29 +5158,6 @@ def set_security_headers(response):
     response.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=()'
     if os.environ.get('ENABLE_HSTS', '').lower() == 'true':
         response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
-
-    # Keep personalized/mutating responses out of intermediary caches while
-    # allowing short browser reuse for expensive public market-data endpoints.
-    public_api_ttls = {
-        '/api/market-sentiment': 60,
-        '/api/snapshot': 60,
-        '/api/market-indexes': 60,
-        '/api/earnings-calendar': 300,
-        '/api/penny-stocks': 300,
-    }
-    if request.method != 'GET' or request.headers.get('Authorization'):
-        response.headers['Cache-Control'] = 'no-store'
-    elif request.path in public_api_ttls and response.status_code == 200:
-        ttl = public_api_ttls[request.path]
-        response.headers['Cache-Control'] = f'private, max-age={ttl}, stale-while-revalidate={ttl}'
-    elif request.path.startswith('/api/stock/') and response.status_code == 200:
-        response.headers['Cache-Control'] = 'private, max-age=300, stale-while-revalidate=300'
-    elif request.path.startswith('/static/') or request.path.startswith('/icon-'):
-        response.headers['Cache-Control'] = 'public, max-age=86400'
-    elif request.path in {'/manifest.json', '/sw.js'}:
-        response.headers['Cache-Control'] = 'public, max-age=300, must-revalidate'
-    else:
-        response.headers['Cache-Control'] = 'no-store'
     return response
 
 

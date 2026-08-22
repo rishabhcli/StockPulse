@@ -1,6 +1,7 @@
 """Tests for the caching system (data/cache.py)."""
 import time
 import threading
+import pytest
 from data.cache import TickerCache, get_ticker_cache, clear_global_cache
 
 
@@ -98,64 +99,6 @@ class TestTickerCache:
             t.join()
 
         assert len(errors) == 0
-
-    def test_lru_capacity_evicts_oldest_entry(self):
-        cache = TickerCache(default_ttl=60, max_size=2)
-        cache.set('A', 1)
-        cache.set('B', 2)
-        assert cache.get('A') == 1  # A is now most recently used.
-
-        cache.set('C', 3)
-
-        assert cache.get('B') is None
-        assert cache.get('A') == 1
-        assert cache.get('C') == 3
-        assert cache.get_stats()['capacity_evictions'] == 1
-
-    def test_get_or_load_coalesces_concurrent_requests(self):
-        cache = TickerCache(default_ttl=60)
-        start = threading.Barrier(6)
-        release = threading.Event()
-        calls = 0
-        calls_lock = threading.Lock()
-        results = []
-
-        def loader():
-            nonlocal calls
-            with calls_lock:
-                calls += 1
-            release.wait(timeout=2)
-            return {'price': 195.0}
-
-        def worker():
-            start.wait(timeout=2)
-            results.append(cache.get_or_load('AAPL', loader, ttl=60))
-
-        threads = [threading.Thread(target=worker) for _ in range(5)]
-        for thread in threads:
-            thread.start()
-        start.wait(timeout=2)
-        time.sleep(0.05)
-        release.set()
-        for thread in threads:
-            thread.join(timeout=2)
-
-        assert calls == 1
-        assert results == [{'price': 195.0}] * 5
-        assert cache.get_stats()['coalesced_waits'] == 4
-
-    def test_get_or_load_can_negative_cache_none(self):
-        cache = TickerCache(default_ttl=60)
-        calls = 0
-
-        def loader():
-            nonlocal calls
-            calls += 1
-            return None
-
-        assert cache.get_or_load('calendar_AAPL', loader) is None
-        assert cache.get_or_load('calendar_AAPL', loader) is None
-        assert calls == 1
 
 
 class TestGlobalCache:

@@ -1,7 +1,5 @@
 // StockPulse Service Worker
-const CACHE_VERSION = 'v3';
-const STATIC_CACHE = `stockpulse-static-${CACHE_VERSION}`;
-const DATA_CACHE = `stockpulse-data-${CACHE_VERSION}`;
+const CACHE_NAME = 'stockpulse-v2';
 const STATIC_ASSETS = [
     '/',
     '/manifest.json',
@@ -9,133 +7,122 @@ const STATIC_ASSETS = [
     '/static/icon-512.png',
     '/static/icon-180.png'
 ];
-const CACHEABLE_API_PATHS = new Set([
-    '/api/snapshot',
-    '/api/market-sentiment',
-    '/api/market-indexes',
-    '/api/earnings-calendar',
-    '/api/penny-stocks'
-]);
 
+// Install event - cache static assets
 self.addEventListener('install', (event) => {
     event.waitUntil(
-        caches.open(STATIC_CACHE)
-            .then((cache) => cache.addAll(STATIC_ASSETS))
+        caches.open(CACHE_NAME)
+            .then((cache) => {
+                console.log('StockPulse SW: Caching static assets');
+                return cache.addAll(STATIC_ASSETS);
+            })
             .then(() => self.skipWaiting())
     );
 });
 
+// Activate event - cleanup old caches
 self.addEventListener('activate', (event) => {
     event.waitUntil(
-        caches.keys()
-            .then((names) => Promise.all(
-                names
-                    .filter((name) => name.startsWith('stockpulse-') && ![STATIC_CACHE, DATA_CACHE].includes(name))
+        caches.keys().then((cacheNames) => {
+            return Promise.all(
+                cacheNames
+                    .filter((name) => name.startsWith('stockpulse-') && name !== CACHE_NAME)
                     .map((name) => caches.delete(name))
-            ))
-            .then(() => self.clients.claim())
+            );
+        }).then(() => self.clients.claim())
     );
 });
 
-async function fetchWithTimeout(request, timeoutMs = 10000) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-        return await fetch(request, { signal: controller.signal });
-    } finally {
-        clearTimeout(timeout);
-    }
-}
-
-async function offlineResponse(request) {
-    const cached = await caches.match(request);
-    if (cached) {
-        const headers = new Headers(cached.headers);
-        headers.set('Warning', '110 - Response is from the offline cache');
-        headers.set('X-StockPulse-Cache', 'offline');
-        return new Response(await cached.blob(), {
-            status: cached.status,
-            statusText: cached.statusText,
-            headers
-        });
-    }
-    return new Response(
-        JSON.stringify({
-            status: 'offline',
-            code: 'network_unavailable',
-            error: 'No network connection or cached market data is available.'
-        }),
-        { status: 503, headers: { 'Content-Type': 'application/json' } }
-    );
-}
-
-async function networkFirstApi(request) {
-    try {
-        const response = await fetchWithTimeout(request);
-        if (response.ok) {
-            const cache = await caches.open(DATA_CACHE);
-            await cache.put(request, response.clone());
-        }
-        return response;
-    } catch {
-        return offlineResponse(request);
-    }
-}
-
-async function staleWhileRevalidate(request, event) {
-    const cached = await caches.match(request);
-    const update = fetch(request)
-        .then(async (response) => {
-            if (response.ok && response.type !== 'opaque') {
-                const cache = await caches.open(STATIC_CACHE);
-                await cache.put(request, response.clone());
-            }
-            return response;
-        });
-
-    if (cached) {
-        event.waitUntil(update.catch(() => undefined));
-        return cached;
-    }
-    return update;
-}
-
+// Fetch event - network first for API, cache first for static
 self.addEventListener('fetch', (event) => {
-    const { request } = event;
-    const url = new URL(request.url);
-    if (url.origin !== self.location.origin) return;
+    const url = new URL(event.request.url);
 
+    // Always fetch API requests from network (real-time data is critical)
     if (url.pathname.startsWith('/api/')) {
-        // Cache only anonymous, idempotent market-data reads. Never persist
-        // analyses, trades, auth-bearing requests, or mutations.
-        if (
-            request.method === 'GET' &&
-            !request.headers.has('Authorization') &&
-            (CACHEABLE_API_PATHS.has(url.pathname) || url.pathname.startsWith('/api/stock/'))
-        ) {
-            event.respondWith(networkFirstApi(request));
-        }
+        event.respondWith(
+            fetch(event.request)
+                .then((response) => {
+                    // Cache successful API responses for offline fallback
+                    if (response.ok) {
+                        const responseClone = response.clone();
+                        caches.open(CACHE_NAME).then((cache) => {
+                            cache.put(event.request, responseClone);
+                        });
+                    }
+                    return response;
+                })
+                .catch(() => {
+                    // Try to return cached API response if network fails
+                    return caches.match(event.request).then((cachedResponse) => {
+                        if (cachedResponse) {
+                            return cachedResponse;
+                        }
+                        return new Response(
+                            JSON.stringify({ error: 'You are offline. Please check your connection.' }),
+                            { 
+                                status: 503,
+                                headers: { 'Content-Type': 'application/json' } 
+                            }
+                        );
+                    });
+                })
+        );
         return;
     }
 
-    if (request.method === 'GET') {
-        event.respondWith(staleWhileRevalidate(request, event));
+    // For static assets, use cache-first strategy
+    event.respondWith(
+        caches.match(event.request)
+            .then((cachedResponse) => {
+                if (cachedResponse) {
+                    // Return cached response and update cache in background
+                    fetch(event.request).then((networkResponse) => {
+                        if (networkResponse && networkResponse.status === 200) {
+                            caches.open(CACHE_NAME).then((cache) => {
+                                cache.put(event.request, networkResponse.clone());
+                            });
+                        }
+                    }).catch(() => {});
+                    return cachedResponse;
+                }
+
+                // No cache, fetch from network
+                return fetch(event.request).then((networkResponse) => {
+                    if (networkResponse && networkResponse.status === 200) {
+                        const responseClone = networkResponse.clone();
+                        caches.open(CACHE_NAME).then((cache) => {
+                            cache.put(event.request, responseClone);
+                        });
+                    }
+                    return networkResponse;
+                });
+            })
+    );
+});
+
+// Handle push notifications (future feature)
+self.addEventListener('push', (event) => {
+    if (event.data) {
+        const data = event.data.json();
+        const options = {
+            body: data.body || 'New market update available',
+            icon: '/static/icon-192.png',
+            badge: '/static/icon-72.png',
+            vibrate: [100, 50, 100],
+            data: {
+                url: data.url || '/'
+            }
+        };
+        event.waitUntil(
+            self.registration.showNotification(data.title || 'StockPulse', options)
+        );
     }
 });
 
-self.addEventListener('push', (event) => {
-    if (!event.data) return;
-    const data = event.data.json();
-    event.waitUntil(self.registration.showNotification(data.title || 'StockPulse', {
-        body: data.body || 'New market update available',
-        icon: '/static/icon-192.png',
-        badge: '/static/icon-72.png',
-        vibrate: [100, 50, 100],
-        data: { url: data.url || '/' }
-    }));
-});
-
+// Handle notification clicks
 self.addEventListener('notificationclick', (event) => {
     event.notification.close();
-    event.waitUntil(clients.openWindow(event.notification.data.url || '/'));
+    event.waitUntil(
+        clients.openWindow(event.notification.data.url || '/')
+    );
 });

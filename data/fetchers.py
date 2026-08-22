@@ -8,44 +8,14 @@ Secondary source: yfinance (rate limited)
 import yfinance as yf
 import pandas as pd
 import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import StringIO
 from typing import Dict, Any, Optional, List
-from datetime import datetime, timezone
+from datetime import datetime
 import logging
-import os
 
 from .cache import get_ticker_cache, TickerCache
 
 logger = logging.getLogger(__name__)
-
-_FETCH_WORKERS = max(1, min(int(os.environ.get('STOCKPULSE_FETCH_WORKERS', '6')), 8))
-_FETCH_EXECUTOR = ThreadPoolExecutor(
-    max_workers=_FETCH_WORKERS,
-    thread_name_prefix='stockpulse-fetch',
-)
-_HTTP_SESSION = requests.Session()
-_HTTP_SESSION.headers.update({'User-Agent': 'StockPulse/3.0'})
-_HTTP_SESSION.mount(
-    'https://',
-    HTTPAdapter(
-        pool_connections=_FETCH_WORKERS,
-        pool_maxsize=_FETCH_WORKERS * 2,
-        max_retries=Retry(
-            total=2,
-            backoff_factor=0.25,
-            status_forcelist=(429, 500, 502, 503, 504),
-            allowed_methods=frozenset({'GET'}),
-        ),
-    ),
-)
-
-
-def _utc_now_iso() -> str:
-    """Return an unambiguous, timezone-aware UTC timestamp."""
-    return datetime.now(timezone.utc).isoformat()
 
 
 # ============== Helper Functions ==============
@@ -71,7 +41,7 @@ def _source_entry(name: str, source: str, payload: Any, error: Optional[str] = N
         'name': name,
         'available': _payload_available(payload),
         'source': source,
-        'fetched_at': _utc_now_iso(),
+        'fetched_at': datetime.utcnow().isoformat(),
         'stale': stale,
         'error': error,
     }
@@ -133,7 +103,11 @@ def get_stooq_data(symbol: str, days: int = 365) -> Optional[pd.DataFrame]:
     """
     cache = get_ticker_cache()
     cache_key = f"stooq_{symbol}_{days}"
-    def load() -> Optional[pd.DataFrame]:
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    try:
         # Stooq symbol mapping
         stooq_symbol = symbol.upper()
         if not stooq_symbol.startswith('^'):
@@ -141,24 +115,18 @@ def get_stooq_data(symbol: str, days: int = 365) -> Optional[pd.DataFrame]:
                 stooq_symbol = f"{stooq_symbol}.US"
 
         url = f'https://stooq.com/q/d/l/?s={stooq_symbol}&i=d'
-        response = _HTTP_SESSION.get(url, timeout=(3.05, 10))
+        response = requests.get(url, timeout=10)
 
         if response.status_code == 200 and len(response.text) > 50:
             df = pd.read_csv(StringIO(response.text))
             if not df.empty and 'Close' in df.columns:
                 df = df.tail(days)
+                cache.set(cache_key, df, ttl=TickerCache.TTL_QUOTE)
                 return df
-        return None
-
-    try:
-        return cache.get_or_load(
-            cache_key,
-            load,
-            ttl=TickerCache.TTL_QUOTE,
-        )
     except Exception as e:
         logger.debug(f"Stooq fetch failed for {symbol}: {e}")
-        return None
+
+    return None
 
 
 def get_stooq_quote(symbol: str) -> Optional[Dict[str, float]]:
@@ -201,32 +169,40 @@ def get_cached_history(symbol: str, period: str = "1y") -> pd.DataFrame:
     cache = get_ticker_cache()
     symbol = normalize_ticker(symbol)
     cache_key = f"history_{symbol}_{period}"
-    def load() -> pd.DataFrame:
-        period_days = {
-            '1d': 1, '2d': 2, '5d': 5, '1mo': 30, '3mo': 90,
-            '6mo': 180, '1y': 365, '2y': 730, '5y': 1825,
-        }
-        days = period_days.get(period, 365)
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
 
-        try:
-            stooq_df = get_stooq_data(symbol, days=days)
-            if stooq_df is not None and not stooq_df.empty:
-                stooq_df = stooq_df.copy()
-                stooq_df['Date'] = pd.to_datetime(stooq_df['Date'])
-                stooq_df.set_index('Date', inplace=True)
-                return stooq_df
-        except Exception as e:
-            logger.debug(f"Stooq history failed for {symbol}: {e}")
+    # Period to days mapping for Stooq
+    period_days = {
+        '1d': 1, '5d': 5, '1mo': 30, '3mo': 90,
+        '6mo': 180, '1y': 365, '2y': 730, '5y': 1825
+    }
+    days = period_days.get(period, 365)
 
-        try:
-            hist = yf.Ticker(symbol).history(period=period)
-            if hist is not None and not hist.empty:
-                return hist
-        except Exception as e:
-            logger.debug(f"yfinance history failed for {symbol}: {e}")
-        return pd.DataFrame()
+    # Try Stooq first (no rate limits)
+    try:
+        stooq_df = get_stooq_data(symbol, days=days)
+        if stooq_df is not None and not stooq_df.empty:
+            stooq_df = stooq_df.copy()
+            stooq_df['Date'] = pd.to_datetime(stooq_df['Date'])
+            stooq_df.set_index('Date', inplace=True)
+            cache.set(cache_key, stooq_df, ttl=TickerCache.TTL_HISTORY)
+            return stooq_df
+    except Exception as e:
+        logger.debug(f"Stooq history failed for {symbol}: {e}")
 
-    return cache.get_or_load(cache_key, load, ttl=TickerCache.TTL_HISTORY)
+    # Fallback to yfinance
+    try:
+        ticker = yf.Ticker(symbol)
+        hist = ticker.history(period=period)
+        if hist is not None and not hist.empty:
+            cache.set(cache_key, hist, ttl=TickerCache.TTL_HISTORY)
+            return hist
+    except Exception as e:
+        logger.debug(f"yfinance history failed for {symbol}: {e}")
+
+    return pd.DataFrame()
 
 
 def get_cached_info(symbol: str) -> Dict[str, Any]:
@@ -242,14 +218,20 @@ def get_cached_info(symbol: str) -> Dict[str, Any]:
     cache = get_ticker_cache()
     symbol = normalize_ticker(symbol)
     cache_key = f"info_{symbol}"
-    def load() -> Dict[str, Any]:
-        try:
-            return yf.Ticker(symbol).info or {}
-        except Exception as e:
-            logger.debug(f"yfinance info failed for {symbol}: {e}")
-            return {}
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
 
-    return cache.get_or_load(cache_key, load, ttl=TickerCache.TTL_INFO)
+    try:
+        ticker = yf.Ticker(symbol)
+        info = ticker.info
+        if info:
+            cache.set(cache_key, info, ttl=TickerCache.TTL_INFO)
+            return info
+    except Exception as e:
+        logger.debug(f"yfinance info failed for {symbol}: {e}")
+
+    return {}
 
 
 def get_cached_news(symbol: str) -> List[Dict]:
@@ -265,14 +247,18 @@ def get_cached_news(symbol: str) -> List[Dict]:
     cache = get_ticker_cache()
     symbol = normalize_ticker(symbol)
     cache_key = f"news_{symbol}"
-    def load() -> List[Dict]:
-        try:
-            return yf.Ticker(symbol).news or []
-        except Exception as e:
-            logger.debug(f"yfinance news failed for {symbol}: {e}")
-            return []
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
 
-    return cache.get_or_load(cache_key, load, ttl=TickerCache.TTL_NEWS)
+    try:
+        ticker = yf.Ticker(symbol)
+        news = ticker.news or []
+        cache.set(cache_key, news, ttl=TickerCache.TTL_NEWS)
+        return news
+    except Exception as e:
+        logger.debug(f"yfinance news failed for {symbol}: {e}")
+        return []
 
 
 def get_cached_calendar(symbol: str) -> Optional[Any]:
@@ -288,16 +274,19 @@ def get_cached_calendar(symbol: str) -> Optional[Any]:
     cache = get_ticker_cache()
     symbol = normalize_ticker(symbol)
     cache_key = f"calendar_{symbol}"
-    def load() -> Optional[Any]:
-        try:
-            return yf.Ticker(symbol).calendar
-        except Exception as e:
-            logger.debug(f"yfinance calendar failed for {symbol}: {e}")
-            return None
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
 
-    # ``get_or_load`` can cache None, so provider failures are coalesced instead
-    # of being retried by every analysis layer for the next 30 minutes.
-    return cache.get_or_load(cache_key, load, ttl=TickerCache.TTL_CALENDAR)
+    try:
+        ticker = yf.Ticker(symbol)
+        calendar = ticker.calendar
+        cache.set(cache_key, calendar, ttl=TickerCache.TTL_CALENDAR)
+        return calendar
+    except Exception as e:
+        logger.debug(f"yfinance calendar failed for {symbol}: {e}")
+        cache.set(cache_key, None, ttl=TickerCache.TTL_CALENDAR)
+        return None
 
 
 # ============== NEW: Financial Statements ==============
@@ -464,7 +453,7 @@ def get_cached_recommendations(symbol: str) -> Optional[pd.DataFrame]:
 
 # ============== Aggregated Data Fetch ==============
 
-def _load_all_stock_data(symbol: str) -> Dict[str, Any]:
+def get_all_stock_data(symbol: str) -> Dict[str, Any]:
     """
     Fetch all available data for a stock in one call.
 
@@ -478,40 +467,13 @@ def _load_all_stock_data(symbol: str) -> Dict[str, Any]:
     """
     symbol = normalize_ticker(symbol)
 
-    jobs = {
-        'history': lambda: get_cached_history(symbol, period="1y"),
-        'info': lambda: get_cached_info(symbol),
-        'news': lambda: get_cached_news(symbol),
-        'calendar': lambda: get_cached_calendar(symbol),
-        'financials': lambda: get_cached_financials(symbol),
-        'holders': lambda: get_cached_holders(symbol),
-        'recommendations': lambda: get_cached_recommendations(symbol),
-    }
-    defaults = {
-        'history': pd.DataFrame(),
-        'info': {},
-        'news': [],
-        'calendar': None,
-        'financials': {'data_available': False},
-        'holders': {'data_available': False},
-        'recommendations': None,
-    }
-    results: Dict[str, Any] = dict(defaults)
-    futures = {_FETCH_EXECUTOR.submit(job): name for name, job in jobs.items()}
-    for future in as_completed(futures):
-        name = futures[future]
-        try:
-            results[name] = future.result()
-        except Exception as exc:
-            logger.debug("%s fetch failed for %s: %s", name, symbol, exc)
-
-    history = results['history']
-    info = results['info']
-    news = results['news']
-    calendar = results['calendar']
-    financials = results['financials']
-    holders = results['holders']
-    recommendations = results['recommendations']
+    history = get_cached_history(symbol, period="1y")
+    info = get_cached_info(symbol)
+    news = get_cached_news(symbol)
+    calendar = get_cached_calendar(symbol)
+    financials = get_cached_financials(symbol)
+    holders = get_cached_holders(symbol)
+    recommendations = get_cached_recommendations(symbol)
 
     current_price = None
     if _payload_available(history):
@@ -552,7 +514,7 @@ def _load_all_stock_data(symbol: str) -> Dict[str, Any]:
 
     return {
         'ticker': symbol,
-        'timestamp': _utc_now_iso(),
+        'timestamp': datetime.utcnow().isoformat(),
         'history': history,
         'info': info,
         'news': news,
@@ -569,21 +531,6 @@ def _load_all_stock_data(symbol: str) -> Dict[str, Any]:
     }
 
 
-def get_all_stock_data(symbol: str) -> Dict[str, Any]:
-    """Return the canonical aggregate, coalescing whole-stock fetches.
-
-    Individual inputs keep their longer type-specific TTLs. The shorter
-    aggregate TTL keeps generated metadata current while avoiding repeated
-    analyzer fan-out across snapshot, screener and detail requests.
-    """
-    symbol = normalize_ticker(symbol)
-    return get_ticker_cache().get_or_load(
-        f'all_stock_data_{symbol}',
-        lambda: _load_all_stock_data(symbol),
-        ttl=TickerCache.TTL_QUOTE,
-    )
-
-
 # ============== Market Data ==============
 
 def get_vix() -> Optional[float]:
@@ -597,33 +544,21 @@ def get_vix() -> Optional[float]:
     return None
 
 
-def _load_market_data() -> Dict[str, Any]:
+def get_market_data() -> Dict[str, Any]:
     """
     Get key market indicators for regime detection.
 
     Returns:
         Dict with SPY, QQQ, IWM, VIX data
     """
-    tracked_symbols = ['SPY', 'QQQ', 'IWM', 'RSP', 'XLY', 'XLP', 'HYG', 'TLT']
-    histories: Dict[str, pd.DataFrame] = {}
-    futures = {
-        _FETCH_EXECUTOR.submit(get_cached_history, symbol, "6mo"): symbol
-        for symbol in tracked_symbols
-    }
-    vix_future = _FETCH_EXECUTOR.submit(get_vix)
-    for future in as_completed(futures):
-        symbol = futures[future]
-        try:
-            histories[symbol] = future.result()
-        except Exception as exc:
-            logger.debug("Market history fetch failed for %s: %s", symbol, exc)
-            histories[symbol] = pd.DataFrame()
-    try:
-        vix = vix_future.result()
-    except Exception as exc:
-        logger.debug("VIX fetch failed: %s", exc)
-        vix = None
+    cache = get_ticker_cache()
+    cache_key = "market_data_aggregate"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
 
+    vix = get_vix()
+    tracked_symbols = ['SPY', 'QQQ', 'IWM', 'RSP', 'XLY', 'XLP', 'HYG', 'TLT']
     market_data = {
         'vix': vix,
         'spy': {},
@@ -634,7 +569,7 @@ def _load_market_data() -> Dict[str, Any]:
         'xlp': {},
         'hyg': {},
         'tlt': {},
-        'timestamp': _utc_now_iso(),
+        'timestamp': datetime.utcnow().isoformat(),
         'sources': {
             'vix': _source_entry('vix', 'stooq/yfinance', vix, None if vix is not None else 'vix_unavailable'),
         },
@@ -642,7 +577,7 @@ def _load_market_data() -> Dict[str, Any]:
 
     for symbol in tracked_symbols:
         try:
-            hist = histories.get(symbol, pd.DataFrame())
+            hist = get_cached_history(symbol, period="6mo")
             if not hist.empty:
                 close = hist['Close']
                 sma_20 = close.rolling(20).mean().iloc[-1] if len(close) >= 20 else close.mean()
@@ -696,13 +631,5 @@ def _load_market_data() -> Dict[str, Any]:
         market_data['economic_context'] = None
         market_data['sources']['economic_context'] = _source_entry('economic_context', 'fred', None, str(e))
 
+    cache.set(cache_key, market_data, ttl=TickerCache.TTL_MARKET)
     return market_data
-
-
-def get_market_data() -> Dict[str, Any]:
-    """Return coalesced market-regime inputs for all analysis requests."""
-    return get_ticker_cache().get_or_load(
-        'market_data_aggregate',
-        _load_market_data,
-        ttl=TickerCache.TTL_MARKET,
-    )

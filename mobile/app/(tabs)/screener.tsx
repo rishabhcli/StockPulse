@@ -1,4 +1,4 @@
-import React, { memo, useDeferredValue, useState } from 'react';
+import React, { useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Input from '../../components/ui/Input';
@@ -40,14 +40,14 @@ const SORTS: { key: SortType; label: string }[] = [
   { key: 'alpha', label: 'A-Z' },
 ];
 
-const ScreenerRow = memo(function ScreenerRow({ stock, onSelect }: { stock: ScreenerResult; onSelect: (ticker: string) => void }) {
+function ScreenerRow({ stock, onPress }: { stock: ScreenerResult; onPress: () => void }) {
   const stale = isTimestampStale(stock.generated_at);
   const score = stock.score ?? stock.investment_score;
   const move = stock.change_pct ?? stock.price_change_pct;
   const freshnessLabel = stock.freshness_summary ?? formatTimestampLabel(stock.generated_at);
 
   return (
-    <Pressable onPress={() => onSelect(stock.ticker)}>
+    <Pressable onPress={onPress}>
       <Surface style={styles.rowCard} variant="filled">
         <View style={styles.rowHeader}>
           <View style={styles.rowCopy}>
@@ -78,15 +78,14 @@ const ScreenerRow = memo(function ScreenerRow({ stock, onSelect }: { stock: Scre
       </Surface>
     </Pressable>
   );
-});
+}
 
 export default function ScreenerScreen() {
   const [filter, setFilter] = useState<FilterType>('all');
   const [sort, setSort] = useState<SortType>('score');
   const [search, setSearch] = useState('');
-  const deferredSearch = useDeferredValue(search);
   const { data: snapshot } = useSnapshotQuery();
-  const { data, isLoading, isFetching, error, refetch } = useScreenerQuery(filter, sort, deferredSearch, 100);
+  const { data, isLoading, isFetching, error, refetch } = useScreenerQuery(filter, sort, search, 100);
   const { openStockSheet } = useSheetContext();
   const stale = isTimestampStale(snapshot?.generated_at);
 
@@ -174,7 +173,7 @@ export default function ScreenerScreen() {
             <SectionHeader title="Results" subtitle={`${data.length} names after filters`} />
             <View style={styles.list}>
               {data.map((stock) => (
-                <ScreenerRow key={stock.ticker} stock={stock} onSelect={openStockSheet} />
+                <ScreenerRow key={`${filter}-${sort}-${stock.ticker}`} stock={stock} onPress={() => openStockSheet(stock.ticker)} />
               ))}
             </View>
           </View>

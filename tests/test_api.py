@@ -47,34 +47,6 @@ class TestHealthEndpoint:
         _assert_request_metadata(resp, data)
 
 
-class TestResponseDelivery:
-    def test_public_market_reads_get_short_private_cache_policy(self, client, monkeypatch):
-        monkeypatch.setattr('app.build_snapshot_v3', lambda: SNAPSHOT_RESPONSE)
-
-        resp = client.get('/api/snapshot')
-
-        assert resp.status_code == 200
-        assert resp.headers['Cache-Control'].startswith('private, max-age=60')
-
-    def test_mutations_are_never_cached(self, client, monkeypatch):
-        monkeypatch.setattr('app.analyze_stock_v3', lambda ticker, persist=True: (AVAILABLE_ANALYSIS, 200))
-
-        resp = client.post('/api/analyze', json={'ticker': 'AAPL'})
-
-        assert resp.status_code == 200
-        assert resp.headers['Cache-Control'] == 'no-store'
-
-    def test_large_json_responses_are_compressed(self, client, monkeypatch):
-        payload = dict(SNAPSHOT_RESPONSE)
-        payload['market_news'] = [{'title': 'Market update ' * 40}] * 20
-        monkeypatch.setattr('app.build_snapshot_v3', lambda: payload)
-
-        resp = client.get('/api/snapshot', headers={'Accept-Encoding': 'gzip'})
-
-        assert resp.status_code == 200
-        assert resp.headers.get('Content-Encoding') == 'gzip'
-
-
 class TestReadyEndpoint:
     def test_ready_returns_ready_state_when_checks_pass(self, client, monkeypatch):
         monkeypatch.setattr('app._check_scorer_config', lambda: {'ok': True, 'version': '2026-03-17', 'path': '/tmp/scoring.json', 'error': None})
@@ -176,27 +148,6 @@ class TestScreenEndpoint:
         assert 'freshness' in data
         assert data['freshness']['status'] in {'fresh', 'partial', 'stale'}
         _assert_request_metadata(resp, data)
-
-    def test_screen_reuses_short_lived_server_payload_cache(self, client, monkeypatch):
-        calls = 0
-
-        def fake_screen(filter_type, limit, tickers=None):
-            nonlocal calls
-            calls += 1
-            return SCREEN_RESPONSE
-
-        monkeypatch.setattr('app.screen_stocks_v3', fake_screen)
-
-        first = client.get('/api/screen?filter=all&limit=10')
-        second = client.get('/api/screen?filter=all&limit=10')
-
-        assert first.status_code == second.status_code == 200
-        assert calls == 1
-        assert first.get_json()['request_id'] != second.get_json()['request_id']
-
-    def test_screen_rejects_unbounded_or_invalid_inputs(self, client):
-        assert client.get('/api/screen?filter=unknown').status_code == 400
-        assert client.get('/api/screen?tickers=AAPL,<script>').status_code == 400
 
 
 class TestSnapshotEndpoint:

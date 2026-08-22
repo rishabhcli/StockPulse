@@ -1,4 +1,4 @@
-import { applyScreenerTransforms, screenerQueryOptions } from '../lib/queryOptions';
+import { applyScreenerTransforms } from '../lib/queryOptions';
 import type { ScreenerResult } from '../lib/types';
 
 const baseRow = (overrides: Partial<ScreenerResult>): ScreenerResult => ({
@@ -35,13 +35,5 @@ describe('applyScreenerTransforms', () => {
     );
 
     expect(results.map((row) => row.ticker)).toEqual(['MSFT', 'AMD']);
-  });
-
-  it('reuses one server cache entry across local sort and search changes', () => {
-    const scoreOptions = screenerQueryOptions('all', 'score', '', 100);
-    const searchOptions = screenerQueryOptions('all', 'alpha', 'apple', 100);
-
-    expect(scoreOptions.queryKey).toEqual(searchOptions.queryKey);
-    expect(scoreOptions.queryKey).toEqual(['screener', 'all', 100]);
   });
 });

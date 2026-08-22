@@ -10,7 +10,7 @@ import {
   StockAnalysis,
 } from './types';
 import { API_URL } from './config';
-import { getAccessToken, isSupabaseEnabled } from './supabase';
+import { supabase, isSupabaseEnabled } from './supabase';
 
 const API_BASE_URL = API_URL;
 
@@ -44,9 +44,9 @@ api.interceptors.request.use(
 
     if (isSupabaseEnabled) {
       try {
-        const accessToken = await getAccessToken();
-        if (accessToken) {
-          config.headers.Authorization = `Bearer ${accessToken}`;
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          config.headers.Authorization = `Bearer ${session.access_token}`;
         }
       } catch {
         // Continue without auth header
@@ -262,7 +262,7 @@ function normalizeScreenerResult(data: any): ScreenerResult {
 }
 
 export const analyzeStock = async (ticker: string): Promise<StockAnalysis> => {
-  const response = await api.post('/api/analyze', { ticker: ticker.trim().toUpperCase(), scoring: 'v3' });
+  const response = await api.post('/api/analyze', { ticker: ticker.toUpperCase(), scoring: 'v3' });
   return normalizeAnalysis(response.data);
 };
 
@@ -291,12 +291,7 @@ export const getPennyStocks = async (): Promise<PennyStock[]> => {
 };
 
 export const getMarketSnapshot = async (): Promise<MarketSnapshot> => {
-  // The penny-stock panel is a separate endpoint, so start both requests at
-  // once instead of extending the critical path after the snapshot resolves.
-  const [response, pennyStocks] = await Promise.all([
-    api.get('/api/snapshot'),
-    getPennyStocks(),
-  ]);
+  const response = await api.get('/api/snapshot');
   const data = response.data;
 
   return {
@@ -311,7 +306,7 @@ export const getMarketSnapshot = async (): Promise<MarketSnapshot> => {
       price: index.price ?? 0,
       change_pct: index.change_pct ?? 0,
     })),
-    penny_stocks: pennyStocks,
+    penny_stocks: await getPennyStocks(),
     eligible_count: data.eligible_count,
     excluded_count: data.excluded_count,
     excluded_reasons_summary: data.excluded_reasons_summary,
