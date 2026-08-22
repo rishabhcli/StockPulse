@@ -41,11 +41,13 @@ const applyScreenerTransforms = (
 export const snapshotQueryOptions = () => queryOptions({
   queryKey: queryKeys.snapshot,
   queryFn: getMarketSnapshot,
+  staleTime: 60_000,
 });
 
 export const marketSentimentQueryOptions = () => queryOptions({
   queryKey: queryKeys.marketSentiment,
   queryFn: getMarketSentiment,
+  staleTime: 2 * 60_000,
 });
 
 export const screenerQueryOptions = (
@@ -54,22 +56,23 @@ export const screenerQueryOptions = (
   search = '',
   limit = 100,
 ) => queryOptions({
-  queryKey: queryKeys.screener(filter, sort, search, limit),
-  queryFn: async () => {
-    const results = await screenStocks(filter, limit);
-    return applyScreenerTransforms(results, sort, search);
-  },
+  queryKey: queryKeys.screener(filter, limit),
+  queryFn: () => screenStocks(filter, limit),
+  select: (results) => applyScreenerTransforms(results, sort, search),
+  staleTime: 5 * 60_000,
 });
 
 export const analysisQueryOptions = (ticker: string) => queryOptions({
   queryKey: queryKeys.analysis(ticker),
-  queryFn: () => analyzeStock(ticker),
+  queryFn: () => analyzeStock(ticker.trim().toUpperCase()),
   enabled: Boolean(ticker.trim()),
+  staleTime: 10 * 60_000,
 });
 
 export const earningsCalendarQueryOptions = (limit = 50) => queryOptions({
   queryKey: queryKeys.earningsCalendar(limit),
   queryFn: () => getEarningsCalendar(limit),
+  staleTime: 30 * 60_000,
 });
 
 export { applyScreenerTransforms };

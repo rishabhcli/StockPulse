@@ -1,12 +1,12 @@
-# Investment Scorer
+# StockPulse
 
-**Investment Scorer** is an intelligent stock analysis platform designed to give traders a clear edge. It instantly calculates a comprehensive **Investment Score (1-100)** for any stock or ETF by synthesizing **Technical Analysis, Fundamental Data, and Market Sentiment** into a single actionable metric.
+**StockPulse** is a stock-analysis platform that calculates a transparent **Investment Score (1-100)** from data quality, intrinsic value, market regime, technical confluence, and catalysts.
 
 Whether you are a day trader or long-term investor, Investment Scorer helps you cut through the noise with clear **Buy/Sell recommendations**, real-time data, and AI-driven insights.
 
 ## Features
 
-- **Investment Score (1-100)**: Comprehensive scoring based on 15+ technical indicators
+- **Investment Score (1-100)**: Canonical v3 layered scoring with confidence and data-quality metadata
 - **Technical Analysis**: RSI, MACD, Bollinger Bands, Stochastic, Williams %R, CCI, ADX, MFI, OBV, VWAP
 - **Fundamental Analysis**: P/E, PEG, Profit Margins, Revenue Growth, ROE, Debt/Equity
 - **Market Sentiment**: VIX, Treasury Yields, S&P 500 trends
@@ -25,6 +25,21 @@ python app.py
 
 # Open browser to http://localhost:8080
 ```
+
+Run the deterministic backend checks with `pytest -q`. Mobile checks are
+`npm run typecheck` and `npm test -- --runInBand` from `mobile/`.
+
+## Runtime Performance
+
+- Independent market-data inputs are fetched concurrently and protected by a
+  bounded in-process LRU/TTL cache.
+- Identical concurrent cache misses are coalesced so only one upstream request
+  reaches Stooq or Yahoo Finance.
+- Large JSON/HTML responses are compressed, while public market-data reads use
+  short browser cache windows and all mutations remain `no-store`.
+- Production launches share `gunicorn.conf.py` across Docker, Railway, Render,
+  and the Procfile. Tune with `WEB_CONCURRENCY`, `GUNICORN_THREADS`,
+  `GUNICORN_TIMEOUT`, and `STOCKPULSE_FETCH_WORKERS`.
 
 ## Daytona Cloud Deployment
 
@@ -85,10 +100,9 @@ GET /api/market-sentiment
 
 ## Scoring Algorithm
 
-The investment score combines:
-
-- **65% Technical Score** (weighted average of indicators)
-- **35% Fundamental Score** (earnings, margins, growth)
+The v3 score combines five evidence layers. Applicability and data quality are
+reported separately, so unavailable fundamentals are not silently treated as a
+neutral signal.
 
 ### Score Interpretation
 
@@ -175,7 +189,7 @@ Investment Scorer is a **Progressive Web App (PWA)**. You can install it directl
 - **Offline Support**: Static assets are cached for offline access
 - **Native App Experience**: Runs in standalone mode without browser UI
 - **Touch Optimized**: Dark theme UI designed for mobile
-- **Real-Time Data**: API calls always fetch fresh market data
+- **Resilient Data**: Public market reads prefer the network and clearly mark cached offline fallbacks
 
 ## Disclaimer
 

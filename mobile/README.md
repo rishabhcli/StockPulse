@@ -16,8 +16,8 @@ A universal React Native + Expo app for iOS, Android, and Web with platform-adap
 
 ### Prerequisites
 
-- Node.js 18+
-- Expo CLI (`npm install -g expo-cli`)
+- Node.js 20+
+- Expo tooling through the project-local `npx expo` command
 - For iOS: Xcode 15+ (macOS only)
 - For Android: Android Studio with emulator
 
@@ -26,7 +26,7 @@ A universal React Native + Expo app for iOS, Android, and Web with platform-adap
 ```bash
 # Install dependencies
 cd mobile
-npm install
+npm ci
 
 # Start development server
 npm start
@@ -35,6 +35,10 @@ npm start
 npm run ios      # iOS Simulator
 npm run android  # Android Emulator
 npm run web      # Web browser
+
+# Validation
+npm run typecheck
+npm test -- --runInBand
 ```
 
 ### Running the Backend

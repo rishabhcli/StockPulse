@@ -282,7 +282,17 @@ export default function RootLayout() {
   );
 
   return (
-    <PersistQueryClientProvider client={queryClient} persistOptions={{ persister: queryPersister }}>
+    <PersistQueryClientProvider
+      client={queryClient}
+      persistOptions={{
+        persister: queryPersister,
+        maxAge: 24 * 60 * 60 * 1000,
+        buster: 'stockpulse-query-v2',
+        dehydrateOptions: {
+          shouldDehydrateQuery: (query) => query.state.status === 'success',
+        },
+      }}
+    >
       {content}
     </PersistQueryClientProvider>
   );

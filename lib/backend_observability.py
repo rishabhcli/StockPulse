@@ -6,13 +6,17 @@ import json
 import logging
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 try:
-    from pythonjsonlogger import jsonlogger  # type: ignore
+    from pythonjsonlogger.json import JsonFormatter  # type: ignore
 except Exception:  # pragma: no cover - optional dependency
-    jsonlogger = None
+    try:
+        from pythonjsonlogger import jsonlogger  # type: ignore
+        JsonFormatter = jsonlogger.JsonFormatter
+    except Exception:
+        JsonFormatter = None
 
 try:
     import sentry_sdk
@@ -27,7 +31,7 @@ class _FallbackJsonFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         payload: Dict[str, Any] = {
-            'timestamp': datetime.utcnow().isoformat(),
+            'timestamp': datetime.now(timezone.utc).isoformat(),
             'level': record.levelname,
             'logger': record.name,
             'message': record.getMessage(),
@@ -64,6 +68,17 @@ class _FallbackJsonFormatter(logging.Formatter):
         return json.dumps(payload, default=str, separators=(',', ':'))
 
 
+if JsonFormatter is not None:
+    class _StockPulseJsonFormatter(JsonFormatter):
+        """Add consistent fields that are not native LogRecord attributes."""
+
+        def add_fields(self, log_record, record, message_dict):
+            super().add_fields(log_record, record, message_dict)
+            log_record['timestamp'] = datetime.now(timezone.utc).isoformat()
+            log_record['level'] = record.levelname
+            log_record['logger'] = record.name
+
+
 def configure_json_logging(level: int = logging.INFO) -> None:
     """Configure root logging to emit JSON records."""
     root = logging.getLogger()
@@ -71,9 +86,9 @@ def configure_json_logging(level: int = logging.INFO) -> None:
         return
 
     handler = logging.StreamHandler()
-    if jsonlogger is not None:
-        formatter = jsonlogger.JsonFormatter(
-            '%(timestamp)s %(level)s %(name)s %(message)s %(request_id)s %(endpoint)s %(path)s %(method)s'
+    if JsonFormatter is not None:
+        formatter = _StockPulseJsonFormatter(
+            '%(timestamp)s %(level)s %(logger)s %(message)s %(request_id)s %(endpoint)s %(path)s %(method)s'
         )
     else:
         formatter = _FallbackJsonFormatter()
@@ -138,7 +153,7 @@ def build_freshness_metadata(
     freshness = {
         'status': freshness_status,
         'summary': summary,
-        'generated_at': generated_at or datetime.utcnow().isoformat(),
+        'generated_at': generated_at or datetime.now(timezone.utc).isoformat(),
         'stale_inputs': stale_inputs,
         'sources_used': sources_used,
         'available_sources': available_sources,

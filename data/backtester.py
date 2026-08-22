@@ -74,6 +74,9 @@ class ValidationResult:
     price_current: float
     return_pct: float
     horizon_days: int
+    days_held: int
+    correct: bool  # Direction correct?
+    timestamp: datetime
     instrument_type: str = 'equity'
     benchmark_ticker: str = 'SPY'
     benchmark_return_pct: float = 0.0
@@ -82,9 +85,6 @@ class ValidationResult:
     transaction_cost_bps: float = 10.0
     slippage_bps: float = 5.0
     scoring_version: str = 'v3'
-    days_held: int
-    correct: bool  # Direction correct?
-    timestamp: datetime
 
     def to_dict(self) -> Dict[str, Any]:
         return {

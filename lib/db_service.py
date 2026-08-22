@@ -3,10 +3,14 @@ Database service layer for StockPulse.
 Abstracts all Supabase operations from business logic.
 All methods degrade gracefully when Supabase is not configured.
 """
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _utc_now():
+    return datetime.now(timezone.utc)
 
 
 class DatabaseService:
@@ -58,7 +62,7 @@ class DatabaseService:
                 'market_sentiment': result.get('market_sentiment', result.get('market_context')),
                 'news_analysis': result.get('news_analysis'),
                 'earnings_data': result.get('earnings'),
-                'timestamp': result.get('generated_at', datetime.utcnow().isoformat()),
+                'timestamp': result.get('generated_at', _utc_now().isoformat()),
             }
 
             resp = self.supabase.table('stock_analyses').insert(record).execute()
@@ -175,7 +179,7 @@ class DatabaseService:
                 'error': trade.get('error'),
                 'is_manual': trade.get('is_manual', False),
                 'cash_after': trade.get('cash_after'),
-                'executed_at': trade.get('timestamp', datetime.utcnow().isoformat()),
+                'executed_at': trade.get('timestamp', _utc_now().isoformat()),
             }
             resp = self.supabase.table('trades').insert(record).execute()
             if resp.data:
@@ -206,7 +210,7 @@ class DatabaseService:
                     'quantity': float(quantity),
                     'avg_entry_price': float(avg_price),
                     'human_controlled': human_controlled,
-                    'updated_at': datetime.utcnow().isoformat(),
+                    'updated_at': _utc_now().isoformat(),
                 }).eq('id', resp.data[0]['id']).execute()
             else:
                 self.supabase.table('portfolio_positions').insert({
@@ -215,7 +219,7 @@ class DatabaseService:
                     'side': side,
                     'quantity': float(quantity),
                     'avg_entry_price': float(avg_price),
-                    'entry_date': datetime.utcnow().isoformat(),
+                    'entry_date': _utc_now().isoformat(),
                     'human_controlled': human_controlled,
                 }).execute()
             return True
@@ -249,7 +253,7 @@ class DatabaseService:
                 'cash': float(cash),
                 'positions_value': float(positions_value),
                 'spy_price': float(spy_price) if spy_price else None,
-                'timestamp': datetime.utcnow().isoformat(),
+                'timestamp': _utc_now().isoformat(),
             }).execute()
             return True
         except Exception as e:
@@ -322,7 +326,7 @@ class DatabaseService:
             ).execute()
             self.supabase.table('portfolios').update({
                 'current_cash': 100000.00,
-                'reset_at': datetime.utcnow().isoformat(),
+                'reset_at': _utc_now().isoformat(),
             }).eq('id', portfolio_id).execute()
             return True
         except Exception as e:
@@ -354,7 +358,7 @@ class DatabaseService:
                 'score': float(score),
                 'recommendation': recommendation,
                 'price_at_scoring': float(price),
-                'timestamp': datetime.utcnow().isoformat(),
+                'timestamp': _utc_now().isoformat(),
             }).execute()
             return True
         except Exception as e:
@@ -369,7 +373,7 @@ class DatabaseService:
             return False
 
         try:
-            expires = datetime.utcnow()
+            expires = _utc_now()
             from datetime import timedelta
             expires += timedelta(minutes=ttl_minutes)
 
@@ -381,7 +385,7 @@ class DatabaseService:
                 'treasury_10y': sentiment_data.get('treasury_10y'),
                 'sp500_trend': sentiment_data.get('sp500_trend'),
                 'overall_sentiment': sentiment_data.get('overall_sentiment'),
-                'timestamp': datetime.utcnow().isoformat(),
+                'timestamp': _utc_now().isoformat(),
                 'expires_at': expires.isoformat(),
             }).execute()
             return True
